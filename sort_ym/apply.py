@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 
 from yandex_music import Client, Playlist
+from yandex_music.exceptions import NetworkError
 
 from .ymclient import with_retries
 
@@ -22,9 +23,58 @@ def _existing_track_ids(client: Client, playlist: Playlist) -> set[str]:
 def _get_or_create_playlist(client: Client, title: str, existing: dict[str, Playlist]) -> Playlist:
     if title in existing:
         return existing[title]
-    playlist = with_retries(lambda: client.users_playlists_create(title, visibility="private"))
+    try:
+        playlist = with_retries(lambda: client.users_playlists_create(title, visibility="private"), max_attempts=1)
+    except NetworkError:
+        # Таймаут не значит, что запрос не дошёл до сервера - плейлист мог всё же
+        # создаться. Перепроверяем по имени вместо слепого повтора (иначе - дубль плейлиста).
+        fresh = _existing_playlists_by_title(client)
+        if title in fresh:
+            existing[title] = fresh[title]
+            return fresh[title]
+        raise
     existing[title] = playlist
     return playlist
+
+
+def _insert_track_verified(
+    client: Client,
+    playlist: Playlist,
+    row: dict,
+    track_key: str,
+    revision: int,
+    max_attempts: int = 4,
+) -> int:
+    """Добавляет трек в плейлист, возвращает новую revision.
+
+    users_playlists_insert_track - операция записи, а не чтения: при таймауте
+    непонятно, применилась ли вставка на сервере. Слепой повтор такого вызова
+    рискует добавить трек второй раз. Поэтому при сетевой ошибке перепроверяем
+    реальное содержимое плейлиста и повторяем вставку, только если трека там
+    действительно ещё нет.
+    """
+    for attempt in range(max_attempts):
+        try:
+            updated = with_retries(
+                lambda: client.users_playlists_insert_track(
+                    playlist.kind, row["id"], row["album_id"], revision=revision
+                ),
+                max_attempts=1,
+            )
+            return updated.revision if updated is not None and updated.revision is not None else revision
+        except NetworkError as e:
+            last_attempt = attempt == max_attempts - 1
+            print(f"  сетевая ошибка при вставке трека ({e}), проверяю фактическое состояние плейлиста...")
+            fresh = with_retries(lambda: client.users_playlists(playlist.kind))
+            if fresh is not None:
+                revision = fresh.revision or revision
+                if track_key in {t.track_id for t in fresh.tracks}:
+                    return revision
+            if last_attempt:
+                raise
+            time.sleep(2.0 * (2**attempt))
+
+    raise RuntimeError("unreachable")
 
 
 def apply_classification(
@@ -53,16 +103,7 @@ def apply_classification(
             if track_key in already:
                 continue
 
-            updated = with_retries(
-                lambda: client.users_playlists_insert_track(
-                    playlist.kind,
-                    row["id"],
-                    row["album_id"],
-                    revision=revision,
-                )
-            )
-            if updated is not None and updated.revision is not None:
-                revision = updated.revision
+            revision = _insert_track_verified(client, playlist, row, track_key, revision)
             already.add(track_key)
             added += 1
             time.sleep(delay)
