@@ -7,8 +7,13 @@ apply_request_delay = 0.3
 request_timeout = 20
 
 [fetch]
-# Сколько id треков в одном батч-запросе client.tracks(...)
+# Сколько id треков в одном батч-запросе client.tracks(...) / client.artists(...)
 batch_size = 100
+
+[classify]
+# Минимальный размер под-жанровой группы (fine, lang), чтобы получить отдельный плейлист.
+# Меньшие группы схлопываются в родительскую крупную корзину (rock/indie-alt/...).
+small_group_min = 12
 
 [paths]
 token_file = ".token"

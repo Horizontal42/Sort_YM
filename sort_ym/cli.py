@@ -17,6 +17,7 @@ def cmd_fetch(args: argparse.Namespace) -> None:
     cfg = load_config()
     client = make_client(auth.get_token(cfg.token_file), cfg.request_timeout)
     fetch.fetch_liked_tracks(client, cfg.cache_dir, cfg.batch_size, cfg.fetch_batch_delay)
+    fetch.fetch_artist_genres(client, cfg.cache_dir, cfg.batch_size, cfg.fetch_batch_delay)
 
 
 def cmd_report(args: argparse.Namespace) -> None:
@@ -28,11 +29,12 @@ def cmd_report(args: argparse.Namespace) -> None:
         raise SystemExit("Кэш треков пуст. Сначала запустите: python -m sort_ym fetch")
 
     catalog = genres.load_or_fetch_catalog(client, cfg.cache_dir)
+    artist_genres = fetch.load_artist_genres(cfg.cache_dir)
 
     ids_needing_lang = [str(t["id"]) for t in tracks_cache.values() if t["lyrics_available"]]
     lang_cache = language.fetch_api_languages(client, ids_needing_lang, cfg.cache_dir, cfg.lyrics_request_delay)
 
-    rows = report.build_rows(tracks_cache, lang_cache, catalog)
+    rows = report.build_rows(tracks_cache, lang_cache, catalog, artist_genres, cfg.small_group_min)
     out_file = report.write_report(rows, cfg.out_dir)
 
     print("\nРаспределение по плейлистам:")
@@ -60,8 +62,9 @@ def cmd_apply(args: argparse.Namespace) -> None:
         raise SystemExit("Кэш треков пуст. Сначала запустите: python -m sort_ym fetch")
 
     catalog = genres.load_or_fetch_catalog(client, cfg.cache_dir)
+    artist_genres = fetch.load_artist_genres(cfg.cache_dir)
     lang_cache = language.load_lang_cache(cfg.cache_dir)
-    rows = report.build_rows(tracks_cache, lang_cache, catalog)
+    rows = report.build_rows(tracks_cache, lang_cache, catalog, artist_genres, cfg.small_group_min)
 
     apply_mod.apply_classification(client, rows, cfg.apply_request_delay, limit=args.limit)
 

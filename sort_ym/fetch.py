@@ -9,6 +9,7 @@ from yandex_music import Client, Track
 from .ymclient import chunked, with_retries
 
 TRACKS_CACHE_FILE = "tracks.json"
+ARTIST_GENRES_CACHE_FILE = "artist_genres.json"
 
 
 def _track_genre(track: Track) -> str | None:
@@ -25,6 +26,7 @@ def _serialize(track: Track) -> dict:
         "album_id": album_id,
         "title": track.title or "",
         "artists": [a.name for a in track.artists if a.name],
+        "artist_ids": [a.id for a in track.artists if a.name and a.id is not None],
         "genre_raw": _track_genre(track),
         "lyrics_available": bool(track.lyrics_available),
     }
@@ -59,7 +61,9 @@ def fetch_liked_tracks(
         return cache
 
     all_ids = likes.tracks_ids
-    missing_ids = [tid for tid in all_ids if tid not in cache]
+    # "not in cache" - трек ещё не загружен; "artist_ids" not in cache[tid] - трек загружен
+    # старой версией кэша (до добавления artist_ids) и должен быть докачан повторно.
+    missing_ids = [tid for tid in all_ids if tid not in cache or "artist_ids" not in cache[tid]]
 
     print(f"Лайкнутых треков: {len(all_ids)}, новых для загрузки: {len(missing_ids)}")
 
@@ -86,5 +90,57 @@ def fetch_liked_tracks(
     if stale:
         _atomic_write_json(cache_file, cache)
         print(f"  убрано из кэша (больше не лайкнуто): {len(stale)}")
+
+    return cache
+
+
+def load_artist_genres(cache_dir: Path) -> dict[str, dict]:
+    cache_file = cache_dir / ARTIST_GENRES_CACHE_FILE
+    if cache_file.exists():
+        return json.loads(cache_file.read_text(encoding="utf-8"))
+    return {}
+
+
+def fetch_artist_genres(
+    client: Client,
+    cache_dir: Path,
+    batch_size: int,
+    batch_delay: float,
+) -> dict[str, dict]:
+    """Догружает жанры артистов (Artist.genres - несколько тегов, точнее одного альбомного genre_raw).
+
+    client.artists() - батч-эндпоинт (как client.tracks()), поэтому даже на тысячу с лишним
+    уникальных артистов уходит около десятка запросов, а не один на артиста.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / ARTIST_GENRES_CACHE_FILE
+    cache = load_artist_genres(cache_dir)
+
+    tracks_cache = load_tracks_cache(cache_dir)
+    # aid может быть None - у части треков сторонней/пиратской загрузки артист в API Яндекса
+    # не привязан к id (есть только имя). Такие пропускаем, их жанр возьмём только по треку.
+    all_artist_ids = {
+        str(aid)
+        for t in tracks_cache.values()
+        for aid in t.get("artist_ids", [])
+        if aid is not None
+    }
+    missing_ids = sorted(aid for aid in all_artist_ids if aid not in cache)
+
+    if not missing_ids:
+        return cache
+
+    print(f"Уникальных артистов: {len(all_artist_ids)}, новых для загрузки: {len(missing_ids)}")
+
+    for batch in chunked(missing_ids, batch_size):
+        artists = with_retries(lambda: client.artists(batch))
+        for artist in artists:
+            cache[str(artist.id)] = {
+                "name": artist.name or "",
+                "genres": list(artist.genres or []),
+            }
+        _atomic_write_json(cache_file, cache)
+        print(f"  загружено {len(cache)}/{len(all_artist_ids)}")
+        time.sleep(batch_delay)
 
     return cache

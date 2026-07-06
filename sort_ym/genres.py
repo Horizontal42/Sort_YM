@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 from yandex_music import Client, Genre
@@ -8,6 +9,22 @@ from yandex_music import Client, Genre
 from .ymclient import with_retries
 
 GENRE_CATALOG_FILE = "genre_catalog.json"
+
+# Общие "зонтичные" альбомные жанры - сигнал низкой уверенности: Яндекс вешает их на
+# альбом по умолчанию, когда не может/не хочет уточнить жанр. Ровно это и создаёт шум,
+# который classify_track чинит через жанры артиста.
+GENERIC_SLUGS = {
+    "rock",
+    "alternative",
+    "indie",
+    "pop",
+    "electronics",
+    "dance",
+    "metal",
+    "rap",
+    "jazz",
+    "folk",
+}
 
 # Корневые жанры каталога Яндекс.Музыки -> наши крупные корзины.
 # Таблица построена по реальному дереву client.genres() (все 34 актуальных корня на момент
@@ -92,9 +109,63 @@ def load_or_fetch_catalog(client: Client, cache_dir: Path) -> dict[str, dict]:
     return flat
 
 
-def bucket_for(genre_raw: str | None, catalog: dict[str, dict]) -> str:
-    if not genre_raw:
+def fine_of(slug: str | None, catalog: dict[str, dict]) -> str | None:
+    """Слаг жанра (любой глубины) -> id корневого жанра ("тонкая" под-жанровая классификация)."""
+    if not slug:
+        return None
+    entry = catalog.get(slug)
+    return entry["root_id"] if entry else slug
+
+
+def coarse_of(fine: str | None) -> str:
+    """Корневой жанр -> одна из 11 крупных корзин ("грубая" классификация)."""
+    if not fine:
         return "other"
-    entry = catalog.get(genre_raw)
-    root_id = entry["root_id"] if entry else genre_raw
-    return ROOT_BUCKET.get(root_id, "other")
+    return ROOT_BUCKET.get(fine, "other")
+
+
+def bucket_for(genre_raw: str | None, catalog: dict[str, dict]) -> str:
+    return coarse_of(fine_of(genre_raw, catalog))
+
+
+def dominant(fines: list[str]) -> str | None:
+    """Самый частый элемент; при равенстве частот - первый по порядку появления."""
+    if not fines:
+        return None
+    return Counter(fines).most_common(1)[0][0]
+
+
+def classify_track(
+    genre_raw: str | None,
+    artist_genre_lists: list[list[str]],
+    catalog: dict[str, dict],
+) -> str:
+    """Сводит жанр трека (альбома) и жанры его артиста(ов) в один под-жанр (root_id).
+
+    Args:
+        genre_raw: жанр альбома трека.
+        artist_genre_lists: список списков жанровых слагов - один список на артиста трека,
+            в порядке артистов (первый - главный).
+        catalog: плоский каталог жанров (см. load_or_fetch_catalog).
+
+    Returns:
+        root_id под-жанра ("punk", "indie", "allrock", ...) или "other".
+    """
+    track_fine = fine_of(genre_raw, catalog)
+
+    artist_fines: list[str] = []
+    for genre_list in artist_genre_lists:
+        for slug in genre_list:
+            fine = fine_of(slug, catalog)
+            if fine:
+                artist_fines.append(fine)
+
+    if not track_fine:
+        return dominant(artist_fines) or "other"
+    if not artist_fines:
+        return track_fine
+    if track_fine in artist_fines:
+        return track_fine
+    if genre_raw in GENERIC_SLUGS:
+        return dominant(artist_fines)
+    return track_fine

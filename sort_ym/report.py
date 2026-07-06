@@ -5,25 +5,49 @@ from pathlib import Path
 
 from . import classify, genres, language
 
-FIELDNAMES = ["title", "artists", "genre_raw", "bucket", "lang", "target_playlist", "id", "album_id"]
+FIELDNAMES = ["title", "artists", "genre_raw", "fine_bucket", "bucket", "lang", "target_playlist", "id", "album_id"]
 
 
 def build_rows(
     tracks_cache: dict[str, dict],
     lang_cache: dict[str, str | None],
     genre_catalog: dict[str, dict],
+    artist_genres: dict[str, dict],
+    small_group_min: int,
 ) -> list[dict]:
-    rows = []
+    # Проход 1: под-жанр (fine) и язык на каждый трек, размеры групп (fine, lang) фиксируем сразу.
+    prelim = []
+    group_sizes: dict[tuple[str, str], int] = {}
     for t in tracks_cache.values():
-        bucket = genres.bucket_for(t["genre_raw"], genre_catalog)
+        artist_lists = [
+            artist_genres[str(aid)]["genres"]
+            for aid in t.get("artist_ids", [])
+            if str(aid) in artist_genres
+        ]
+        fine = genres.classify_track(t["genre_raw"], artist_lists, genre_catalog)
         api_lang = lang_cache.get(str(t["id"]))
         lang = language.detect_language(t["title"], t["artists"], t["genre_raw"], api_lang)
+
+        prelim.append((t, fine, lang))
+        key = (fine, lang)
+        group_sizes[key] = group_sizes.get(key, 0) + 1
+
+    # Проход 2 (одиночный, не итеративный): мелкие под-жанровые группы схлопываем в
+    # родительскую крупную корзину. coarse_of детерминирована от fine, поэтому повторного
+    # пересчёта размеров и зацикливания тут не бывает.
+    rows = []
+    for t, fine, lang in prelim:
+        if group_sizes[(fine, lang)] < small_group_min:
+            bucket = genres.coarse_of(fine)
+        else:
+            bucket = fine
         playlist = classify.playlist_name(bucket, lang)
         rows.append(
             {
                 "title": t["title"],
                 "artists": ", ".join(t["artists"]),
                 "genre_raw": t["genre_raw"] or "",
+                "fine_bucket": fine,
                 "bucket": bucket,
                 "lang": lang,
                 "target_playlist": playlist,

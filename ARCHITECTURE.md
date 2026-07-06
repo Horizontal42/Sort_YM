@@ -7,19 +7,24 @@
 
 ```
 sort_ym/
-  config.py     — чтение config.toml (throttle, пути к кэшу/токену)
+  config.py     — чтение config.toml (throttle, small_group_min, пути к кэшу/токену)
   auth.py       — OAuth device-flow, хранение токена в .token
-  ymclient.py   — создание Client, батч-нарезка списков
-  fetch.py      — лайки -> полные Track -> cache/tracks.json (докачивается инкрементально)
-  genres.py     — реальное дерево жанров Яндекса -> 11 крупных корзин (ROOT_BUCKET)
+  ymclient.py   — создание Client, батч-нарезка списков, ретраи сетевых ошибок
+  fetch.py      — лайки -> полные Track -> cache/tracks.json; артисты треков ->
+                  client.artists() -> cache/artist_genres.json (оба докачиваются инкрементально)
+  genres.py     — реальное дерево жанров Яндекса; classify_track — сведение жанра трека и жанров
+                  артиста в один под-жанр (root_id); ROOT_BUCKET — под-жанр -> 11 крупных корзин
   language.py   — гибридная детекция языка (API текста / жанр-подсказка / алфавит)
-  classify.py   — (корзина, язык) -> имя плейлиста
-  report.py     — сборка строк отчёта, запись out/report.csv, сводки
+  classify.py   — (под-жанр | крупная корзина, язык) -> имя плейлиста
+  report.py     — двухпроходная сборка строк отчёта, запись out/report.csv, сводки
   apply.py      — создание плейлистов + идемпотентное добавление треков
   cli.py        — команды auth / fetch / report / apply
 
 tests/
-  test_genres.py, test_language.py — тесты чистых функций (маппинг, детекция языка)
+  test_genres.py — classify_track, dominant, bucket_for, дерево жанров
+  test_language.py — детекция языка
+  test_report.py — двухпроходное схлопывание мелких под-жанровых групп
+  test_fetch.py, test_apply.py — кэш треков/артистов, идемпотентность применения
 
 cache/  — кэш API (в .gitignore)
 out/    — отчёты (в .gitignore)
@@ -29,20 +34,44 @@ out/    — отчёты (в .gitignore)
 
 ```
 auth  → .token
-fetch → users_likes_tracks() → client.tracks(batch) → cache/tracks.json
+fetch → users_likes_tracks() → client.tracks(batch) → cache/tracks.json (+ artist_ids)
+      → client.artists(batch) по уникальным artist_ids → cache/artist_genres.json
 report → genres.load_or_fetch_catalog() → cache/genre_catalog.json
        → language.fetch_api_languages() → cache/lyrics_lang.json
-       → build_rows() → out/report.csv (dry-run, аккаунт не меняется)
+       → build_rows(): проход 1 — classify_track() на каждый трек (genre_raw + жанры артиста)
+                        проход 2 — группы < small_group_min схлопываются в крупную корзину
+       → out/report.csv (dry-run, аккаунт не меняется)
 apply --yes → users_playlists_create / users_playlists_insert_track
 ```
 
 ## Ключевые решения
 
 - **Жанр трека** доступен только через альбом (`Track.albums[0].genre`), у самого трека поля
-  жанра нет. Раскладка на 11 крупных групп сделана через реальное дерево `client.genres()`
-  (родитель → под-жанры), а не через угаданный список слагов — так таблица `ROOT_BUCKET` в
-  `genres.py` опирается на подтверждённые id, а не на предположения. Жанры без совпадения падают
-  в корзину `other` и печатаются в выводе `report` для ручного дополнения таблицы.
+  жанра нет — это одна строка на трек, часто общая (`rock`, `alternative`). Раскладка по корзинам
+  сделана через реальное дерево `client.genres()` (родитель → под-жанры), а не через угаданный
+  список слагов — таблица `ROOT_BUCKET` в `genres.py` опирается на подтверждённые id, а не на
+  предположения. Жанры без совпадения падают в корзину `other` и печатаются в выводе `report` для
+  ручного дополнения таблицы.
+
+- **Под-жанровая классификация (`genres.classify_track`)**: жанр трека — это одна строка на альбом
+  и часто общая. У артиста же (`client.artists()`, батч-эндпоинт) может быть несколько тегов,
+  точнее одного альбомного. `classify_track(genre_raw, artist_genre_lists, catalog)` сводит оба
+  сигнала в один под-жанр (`root_id`, например `punk`/`indie`/`allrock`) на уровне **трека**, а не
+  артиста — так один и тот же артист с разными по духу треками раскладывается по разным плейлистам:
+  1. Согласие сигналов (жанр трека есть среди жанров артиста) → берём его — гранулярно по треку.
+  2. У трека нет жанра → берём самый частый (`dominant`) жанр среди артистов трека.
+  3. У артиста(ов) нет тегов → берём жанр трека.
+  4. Конфликт: альбомный тег общий/"зонтичный" (`GENERIC_SLUGS`: `rock`, `alternative`, `pop`, ... —
+     дефолт Яндекса низкой уверенности) → побеждает жанр артиста (`dominant` по объединённым тегам
+     всех артистов трека, тай-брейк — по порядку появления). Альбомный тег точный/специфичный
+     (`numetal`, `dnb`, ...) → побеждает он — вероятный настоящий эксперимент артиста в другом
+     жанре, а не шум, который стоило бы поправить.
+
+  Результат (`fine`) — двухпроходно схлопывается в `report.build_rows`: сначала считаются размеры
+  групп `(fine, lang)`, затем группы меньше `config.small_group_min` переезжают в родительскую
+  крупную корзину через `genres.coarse_of(fine)` (тонкая обёртка над `ROOT_BUCKET`). Проход
+  одиночный (не итеративный) — `coarse_of` детерминирована от `fine`, поэтому пересчёта размеров и
+  зацикливания нет.
 
 - **Язык** определяется гибридно, в порядке приоритета:
   1. `client.track_supplement(track_id).lyrics.text_language` — единственное поле в библиотеке
@@ -69,7 +98,10 @@ apply --yes → users_playlists_create / users_playlists_insert_track
 ## Хранилище
 
 - `.token` — OAuth-токен аккаунта (не коммитится).
-- `cache/tracks.json` — метаданные лайкнутых треков.
+- `cache/tracks.json` — метаданные лайкнутых треков, включая `artist_ids` (id артистов трека).
+- `cache/artist_genres.json` — `{artist_id: {name, genres: [slug, ...]}}`, один и более жанров
+  на артиста.
 - `cache/genre_catalog.json` — плоский снимок дерева жанров Яндекса (id -> title, root_id).
 - `cache/lyrics_lang.json` — язык текста песни по треку (id -> language code | null).
-- `out/report.csv` — предпросмотр распределения по плейлистам перед `apply`.
+- `out/report.csv` — предпросмотр распределения по плейлистам перед `apply` (включая колонку
+  `fine_bucket` — под-жанр до возможного схлопывания в крупную корзину).

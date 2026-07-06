@@ -14,6 +14,7 @@ class Config:
     apply_request_delay: float
     request_timeout: float
     batch_size: int
+    small_group_min: int
     token_file: Path
     cache_dir: Path
     out_dir: Path
@@ -30,6 +31,7 @@ def load_config(path: Path | None = None) -> Config:
         apply_request_delay=data["throttle"]["apply_request_delay"],
         request_timeout=data["throttle"]["request_timeout"],
         batch_size=data["fetch"]["batch_size"],
+        small_group_min=data["classify"]["small_group_min"],
         token_file=ROOT / data["paths"]["token_file"],
         cache_dir=ROOT / data["paths"]["cache_dir"],
         out_dir=ROOT / data["paths"]["out_dir"],
