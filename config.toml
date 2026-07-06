@@ -1,0 +1,14 @@
+[throttle]
+# Пауза между запросами к API, секунды
+fetch_batch_delay = 0.4
+lyrics_request_delay = 0.25
+apply_request_delay = 0.3
+
+[fetch]
+# Сколько id треков в одном батч-запросе client.tracks(...)
+batch_size = 100
+
+[paths]
+token_file = ".token"
+cache_dir = "cache"
+out_dir = "out"
