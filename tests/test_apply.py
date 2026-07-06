@@ -1,4 +1,4 @@
-from yandex_music.exceptions import TimedOutError
+from yandex_music.exceptions import BadRequestError, TimedOutError
 
 from sort_ym import apply as apply_mod
 
@@ -92,3 +92,44 @@ def test_apply_does_not_duplicate_track_on_timeout_after_server_applied_write():
 
     assert client.insert_calls == 1, "insert_track не должен вызываться повторно вслепую при таймауте"
     assert client.server_tracks == [(1, 10)], "трек должен оказаться в плейлисте ровно один раз"
+
+
+def test_apply_skips_tracks_without_album_id():
+    # Самозалитые/пиратские треки без альбома - Яндекс не даёт вставить такой трек в
+    # плейлист (albumId обязателен). Должны пропускаться без попытки вставки и без падения.
+    client = FakeClient()
+    rows = [
+        {"target_playlist": "Поп — INT", "id": 1, "album_id": None, "title": "no album"},
+        {"target_playlist": "Поп — INT", "id": 2, "album_id": 20, "title": "has album"},
+    ]
+
+    apply_mod.apply_classification(client, rows, delay=0)
+
+    assert client.inserted == [(200, 2, 20, 1)], "трек без альбома не должен уходить в insert_track"
+
+
+class BadRequestClient(FakeClient):
+    """insert_track кидает BadRequestError (детерминированный отказ) на конкретном треке."""
+
+    def __init__(self, bad_track_id):
+        super().__init__()
+        self.playlists = {200: FakePlaylist(200, "Поп — INT", revision=1, tracks=[])}
+        self.next_kind = 201
+        self._bad_track_id = bad_track_id
+
+    def users_playlists_insert_track(self, kind, track_id, album_id, revision=1):
+        if track_id == self._bad_track_id:
+            raise BadRequestError({"name": "wrong-json", "message": "Invalid JSON rules"})
+        return super().users_playlists_insert_track(kind, track_id, album_id, revision)
+
+
+def test_apply_continues_after_bad_request_on_single_track():
+    client = BadRequestClient(bad_track_id=1)
+    rows = [
+        {"target_playlist": "Поп — INT", "id": 1, "album_id": 10, "title": "broken"},
+        {"target_playlist": "Поп — INT", "id": 2, "album_id": 20, "title": "ok"},
+    ]
+
+    apply_mod.apply_classification(client, rows, delay=0)
+
+    assert client.inserted == [(200, 2, 20, 1)], "второй трек должен вставиться, несмотря на ошибку первого"

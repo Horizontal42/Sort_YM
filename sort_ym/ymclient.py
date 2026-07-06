@@ -4,7 +4,7 @@ import time
 from typing import Callable, Iterator, List, TypeVar
 
 from yandex_music import Client
-from yandex_music.exceptions import NetworkError, NotFoundError
+from yandex_music.exceptions import BadRequestError, NetworkError, NotFoundError
 
 T = TypeVar("T")
 
@@ -24,14 +24,15 @@ def chunked(items: List[T], size: int) -> Iterator[List[T]]:
 def with_retries(fn: Callable[[], T], max_attempts: int = 4, base_delay: float = 2.0) -> T:
     """Повторяет вызов при временных сетевых сбоях (таймауты и т.п.) с экспоненциальной паузой.
 
-    NotFoundError не повторяется - это окончательный ответ API, а не сбой сети,
-    хотя формально он тоже унаследован от NetworkError.
+    NotFoundError и BadRequestError не повторяются - это окончательные ответы сервера
+    (данные точно не найдены / запрос точно невалиден), а не сбои сети, хотя формально
+    оба тоже унаследованы от NetworkError. Повтор такого запроса даст тот же результат.
     """
     last_exc: NetworkError | None = None
     for attempt in range(max_attempts):
         try:
             return fn()
-        except NotFoundError:
+        except (NotFoundError, BadRequestError):
             raise
         except NetworkError as e:
             last_exc = e

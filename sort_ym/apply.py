@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from yandex_music import Client, Playlist
-from yandex_music.exceptions import NetworkError
+from yandex_music.exceptions import BadRequestError, NetworkError
 
 from .ymclient import with_retries
 
@@ -62,6 +62,10 @@ def _insert_track_verified(
                 max_attempts=1,
             )
             return updated.revision if updated is not None and updated.revision is not None else revision
+        except BadRequestError:
+            # Детерминированный отказ сервера (например, невалидные данные трека) - ответ
+            # точно получен, трек точно не вставлен. Повторять бессмысленно, пробрасываем сразу.
+            raise
         except NetworkError as e:
             last_attempt = attempt == max_attempts - 1
             print(f"  сетевая ошибка при вставке трека ({e}), проверяю фактическое состояние плейлиста...")
@@ -98,15 +102,34 @@ def apply_classification(
         revision = playlist.revision or 1
 
         added = 0
+        no_album = 0
+        failed = 0
         for row in playlist_rows:
             track_key = f"{row['id']}:{row['album_id']}" if row["album_id"] else str(row["id"])
             if track_key in already:
                 continue
 
-            revision = _insert_track_verified(client, playlist, row, track_key, revision)
+            if row["album_id"] is None:
+                # Самозалитые/пиратские треки без альбома - Яндекс не даёт вставить такой
+                # трек в плейлист (albumId обязателен), это не временный сбой. Пропускаем.
+                no_album += 1
+                continue
+
+            try:
+                revision = _insert_track_verified(client, playlist, row, track_key, revision)
+            except BadRequestError as e:
+                print(f"  пропущен трек id={row['id']} ({row.get('title', '?')!r}): {e}")
+                failed += 1
+                continue
+
             already.add(track_key)
             added += 1
             time.sleep(delay)
 
-        skipped = len(playlist_rows) - added
-        print(f"{title}: добавлено {added}, уже было {skipped}")
+        already_had = len(playlist_rows) - added - no_album - failed
+        summary = f"{title}: добавлено {added}, уже было {already_had}"
+        if no_album:
+            summary += f", пропущено без альбома {no_album}"
+        if failed:
+            summary += f", ошибок {failed}"
+        print(summary)
