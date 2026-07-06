@@ -65,8 +65,17 @@ def fetch_liked_tracks(
 
     for batch in chunked(missing_ids, batch_size):
         tracks = with_retries(lambda: client.tracks(batch))
-        for track in tracks:
-            cache[track.track_id] = _serialize(track)
+        if len(tracks) != len(batch):
+            print(
+                f"  предупреждение: запрошено {len(batch)} треков, получено {len(tracks)} - "
+                "часть могла быть удалена из каталога Яндекса, попробуем ещё раз при следующем fetch"
+            )
+        # Кэшируем по исходному id из списка лайков (likes.tracks_ids), а не по track.track_id,
+        # пересчитанному из albums[0] вернувшегося Track - для трека, доступного на нескольких
+        # альбомах, "основной" альбом в ответе может отличаться от того, под которым трек лайкнут.
+        # Иначе такой трек тут же попадает под stale-очистку ниже как "больше не лайкнутый".
+        for original_id, track in zip(batch, tracks):
+            cache[original_id] = _serialize(track)
         _atomic_write_json(cache_file, cache)
         print(f"  загружено {len(cache)}/{len(all_ids)}")
         time.sleep(batch_delay)
