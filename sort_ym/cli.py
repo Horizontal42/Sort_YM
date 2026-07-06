@@ -15,13 +15,13 @@ def cmd_auth(args: argparse.Namespace) -> None:
 
 def cmd_fetch(args: argparse.Namespace) -> None:
     cfg = load_config()
-    client = make_client(auth.get_token(cfg.token_file))
+    client = make_client(auth.get_token(cfg.token_file), cfg.request_timeout)
     fetch.fetch_liked_tracks(client, cfg.cache_dir, cfg.batch_size, cfg.fetch_batch_delay)
 
 
 def cmd_report(args: argparse.Namespace) -> None:
     cfg = load_config()
-    client = make_client(auth.get_token(cfg.token_file))
+    client = make_client(auth.get_token(cfg.token_file), cfg.request_timeout)
 
     tracks_cache = fetch.load_tracks_cache(cfg.cache_dir)
     if not tracks_cache:
@@ -53,7 +53,7 @@ def cmd_apply(args: argparse.Namespace) -> None:
         raise SystemExit("Это изменит ваш аккаунт. Добавьте флаг --yes для подтверждения.")
 
     cfg = load_config()
-    client = make_client(auth.get_token(cfg.token_file))
+    client = make_client(auth.get_token(cfg.token_file), cfg.request_timeout)
 
     tracks_cache = fetch.load_tracks_cache(cfg.cache_dir)
     if not tracks_cache:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from yandex_music import Client, Track
 
-from .ymclient import chunked
+from .ymclient import chunked, with_retries
 
 TRACKS_CACHE_FILE = "tracks.json"
 
@@ -53,7 +53,7 @@ def fetch_liked_tracks(
     cache_file = cache_dir / TRACKS_CACHE_FILE
     cache = load_tracks_cache(cache_dir)
 
-    likes = client.users_likes_tracks()
+    likes = with_retries(lambda: client.users_likes_tracks())
     if likes is None:
         print("Не удалось получить список лайкнутых треков.")
         return cache
@@ -64,7 +64,7 @@ def fetch_liked_tracks(
     print(f"Лайкнутых треков: {len(all_ids)}, новых для загрузки: {len(missing_ids)}")
 
     for batch in chunked(missing_ids, batch_size):
-        tracks = client.tracks(batch)
+        tracks = with_retries(lambda: client.tracks(batch))
         for track in tracks:
             cache[track.track_id] = _serialize(track)
         _atomic_write_json(cache_file, cache)

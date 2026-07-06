@@ -5,6 +5,8 @@ from pathlib import Path
 
 from yandex_music import Client, Genre
 
+from .ymclient import with_retries
+
 GENRE_CATALOG_FILE = "genre_catalog.json"
 
 # Корневые жанры каталога Яндекс.Музыки -> наши крупные корзины.
@@ -83,7 +85,7 @@ def load_or_fetch_catalog(client: Client, cache_dir: Path) -> dict[str, dict]:
     if cache_file.exists():
         return json.loads(cache_file.read_text(encoding="utf-8"))
 
-    roots = client.genres()
+    roots = with_retries(lambda: client.genres())
     flat = flatten_catalog(roots)
     cache_file.write_text(json.dumps(flat, ensure_ascii=False, indent=2), encoding="utf-8")
     return flat

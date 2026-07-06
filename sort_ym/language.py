@@ -6,7 +6,9 @@ import unicodedata
 from pathlib import Path
 
 from yandex_music import Client
-from yandex_music.exceptions import YandexMusicError
+from yandex_music.exceptions import NotFoundError
+
+from .ymclient import with_retries
 
 LYRICS_LANG_CACHE_FILE = "lyrics_lang.json"
 
@@ -99,8 +101,8 @@ def load_lang_cache(cache_dir: Path) -> dict[str, str | None]:
 
 def _fetch_one_language(client: Client, track_id: str) -> str | None:
     try:
-        supplement = client.track_supplement(track_id)
-    except YandexMusicError:
+        supplement = with_retries(lambda: client.track_supplement(track_id))
+    except NotFoundError:
         return None
     if supplement is None or supplement.lyrics is None:
         return None

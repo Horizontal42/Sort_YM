@@ -4,14 +4,16 @@ import time
 
 from yandex_music import Client, Playlist
 
+from .ymclient import with_retries
+
 
 def _existing_playlists_by_title(client: Client) -> dict[str, Playlist]:
-    playlists = client.users_playlists_list()
+    playlists = with_retries(lambda: client.users_playlists_list())
     return {p.title: p for p in playlists if p.title}
 
 
 def _existing_track_ids(client: Client, playlist: Playlist) -> set[str]:
-    full = client.users_playlists(playlist.kind)
+    full = with_retries(lambda: client.users_playlists(playlist.kind))
     if full is None:
         return set()
     return {t.track_id for t in full.tracks}
@@ -20,7 +22,7 @@ def _existing_track_ids(client: Client, playlist: Playlist) -> set[str]:
 def _get_or_create_playlist(client: Client, title: str, existing: dict[str, Playlist]) -> Playlist:
     if title in existing:
         return existing[title]
-    playlist = client.users_playlists_create(title, visibility="private")
+    playlist = with_retries(lambda: client.users_playlists_create(title, visibility="private"))
     existing[title] = playlist
     return playlist
 
@@ -51,11 +53,13 @@ def apply_classification(
             if track_key in already:
                 continue
 
-            updated = client.users_playlists_insert_track(
-                playlist.kind,
-                row["id"],
-                row["album_id"],
-                revision=revision,
+            updated = with_retries(
+                lambda: client.users_playlists_insert_track(
+                    playlist.kind,
+                    row["id"],
+                    row["album_id"],
+                    revision=revision,
+                )
             )
             if updated is not None and updated.revision is not None:
                 revision = updated.revision

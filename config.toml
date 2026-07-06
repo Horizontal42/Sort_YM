@@ -3,6 +3,8 @@
 fetch_batch_delay = 0.4
 lyrics_request_delay = 0.25
 apply_request_delay = 0.3
+# Таймаут одного запроса, секунды (библиотека по умолчанию ставит 5 - мало при медленной сети)
+request_timeout = 20
 
 [fetch]
 # Сколько id треков в одном батч-запросе client.tracks(...)
