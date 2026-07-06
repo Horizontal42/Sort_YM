@@ -10,57 +10,58 @@ from .ymclient import with_retries
 GENRE_CATALOG_FILE = "genre_catalog.json"
 
 # Корневые жанры каталога Яндекс.Музыки -> наши крупные корзины.
-# Список получен из реального дерева client.genres() и может дополняться:
-# если жанр трека не находится ни в одном известном корне, он попадает в "other" —
+# Таблица построена по реальному дереву client.genres() (все 34 актуальных корня на момент
+# написания), а не по предположениям об именах слагов — проверено на живом каталоге
+# (cache/genre_catalog.json). Если Яндекс добавит новый корневой жанр, он попадёт в "other" —
 # смотрите разбивку "other" в выводе команды report, чтобы дополнить таблицу.
 ROOT_BUCKET: dict[str, str] = {
-    "pop": "pop",
-    "ruspop": "pop",
-    "estrada": "pop",
-    "rnb": "pop",
-    "disco": "pop",
-    "rock": "rock",
-    "rusrock": "rock",
-    "hardrock": "rock",
-    "prog": "rock",
+    # рок
+    "allrock": "rock",
+    # инди / альтернатива / панк
     "alternative": "indie-alt",
     "indie": "indie-alt",
     "punk": "indie-alt",
-    "postrock": "indie-alt",
+    # метал
     "metal": "metal",
-    "extreme": "metal",
-    "industrial": "metal",
+    # рэп
     "rap": "rap",
-    "rusrap": "rap",
-    "hip": "rap",
-    "hiphop": "rap",
-    "trap": "rap",
+    # электроника / танцевальная
     "electronics": "electronic",
     "dance": "electronic",
-    "house": "electronic",
-    "techno": "electronic",
-    "trance": "electronic",
-    "dnb": "electronic",
-    "dubstep": "electronic",
+    # джаз и блюз
     "jazz": "jazz-blues",
     "blues": "jazz-blues",
-    "soul": "jazz-blues",
-    "funk": "jazz-blues",
+    # классика
     "classicalmusic": "classical",
-    "classical": "classical",
-    "opera": "classical",
+    # поп
+    "pop": "pop",
+    "estrada": "pop",
+    "rnb": "pop",
+    # фолк и world
     "folk": "folk-world",
+    "folkgenre": "folk-world",
     "bard": "folk-world",
-    "author": "folk-world",
-    "avtorskaya": "folk-world",
     "shanson": "folk-world",
-    "world": "folk-world",
-    "reggae": "folk-world",
     "country": "folk-world",
-    "films": "soundtrack",
+    "reggae": "folk-world",
+    "ska": "folk-world",
+    "islamicgenre": "folk-world",
+    # саундтреки
     "soundtrack": "soundtrack",
-    "musical": "soundtrack",
-    "cartoon": "soundtrack",
+    # не музыка / нераспределяемое -> "other"
+    "all": "other",
+    "other": "other",
+    "relax": "other",
+    "children": "other",
+    "forchildren": "other",
+    "poemsforchildren": "other",
+    "fairytales": "other",
+    "audiobooks": "other",
+    "booksnotinrussian": "other",
+    "fiction": "other",
+    "nonfictionliterature": "other",
+    "podcasts": "other",
+    "naturesounds": "other",
 }
 
 

@@ -5,11 +5,14 @@ from sort_ym import genres
 
 @pytest.fixture
 def catalog():
+    # Форма реального дерева client.genres(): "rock"/"rusrock" - подгенры, реальный
+    # корень называется "allrock", а не "rock" (проверено на живом каталоге).
     return {
-        "rock": {"title": "Рок", "root_id": "rock"},
-        "rusrock": {"title": "Русский рок", "root_id": "rock"},
-        "postrock": {"title": "Пост-рок", "root_id": "postrock"},
-        "rap": {"title": "Рэп", "root_id": "rap"},
+        "allrock": {"title": "Рок", "root_id": "allrock"},
+        "rock": {"title": "Иностранный рок", "root_id": "allrock"},
+        "rusrock": {"title": "Русский рок", "root_id": "allrock"},
+        "alternative": {"title": "Альтернатива", "root_id": "alternative"},
+        "rap": {"title": "Рэп и хип-хоп", "root_id": "rap"},
         "trap": {"title": "Трэп", "root_id": "rap"},
     }
 
@@ -17,9 +20,10 @@ def catalog():
 @pytest.mark.parametrize(
     "genre_raw,expected",
     [
+        ("allrock", "rock"),
         ("rock", "rock"),
         ("rusrock", "rock"),
-        ("postrock", "indie-alt"),
+        ("alternative", "indie-alt"),
         ("rap", "rap"),
         ("trap", "rap"),
         (None, "other"),
