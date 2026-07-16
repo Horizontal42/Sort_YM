@@ -69,6 +69,12 @@ def cmd_apply(args: argparse.Namespace) -> None:
     apply_mod.apply_classification(client, rows, cfg.apply_request_delay, limit=args.limit)
 
 
+def cmd_dedupe(args: argparse.Namespace) -> None:
+    cfg = load_config()
+    client = make_client(auth.get_token(cfg.token_file), cfg.request_timeout)
+    apply_mod.dedupe_playlists(client, cfg.apply_request_delay, dry_run=not args.yes)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="sort_ym", description="Сортировка лайкнутых треков Яндекс.Музыки по жанру и языку")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -81,6 +87,9 @@ def main(argv: list[str] | None = None) -> None:
     p_apply.add_argument("--yes", action="store_true", help="подтвердить внесение изменений в аккаунт")
     p_apply.add_argument("--limit", type=int, default=None, help="ограничить количество треков (для пробного запуска)")
 
+    p_dedupe = sub.add_parser("dedupe", help="найти и убрать повторные вставки одного трека в плейлистах")
+    p_dedupe.add_argument("--yes", action="store_true", help="подтвердить удаление дублей (без флага - только отчёт)")
+
     args = parser.parse_args(argv)
 
     commands = {
@@ -88,6 +97,7 @@ def main(argv: list[str] | None = None) -> None:
         "fetch": cmd_fetch,
         "report": cmd_report,
         "apply": cmd_apply,
+        "dedupe": cmd_dedupe,
     }
     commands[args.command](args)
 

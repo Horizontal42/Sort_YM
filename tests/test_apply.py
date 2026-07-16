@@ -45,6 +45,12 @@ class FakeClient:
         p.revision = revision + 1
         return p
 
+    def users_playlists_delete_track(self, kind, from_, to, revision=1):
+        p = self.playlists[kind]
+        del p.tracks[from_:to]
+        p.revision = revision + 1
+        return p
+
 
 class FlakyClient:
     """insert_track кидает таймаут на первой попытке, но трек всё же
@@ -179,3 +185,41 @@ def test_apply_raises_instead_of_silently_treating_persistent_none_as_empty(monk
         assert False, "должно было упасть, а не молча решить, что плейлист пуст"
     except RuntimeError:
         pass
+
+
+def test_find_duplicate_ranges_no_duplicates():
+    assert apply_mod.find_duplicate_ranges(["1:10", "2:20", "3:30"]) == []
+
+
+def test_find_duplicate_ranges_single_contiguous_block():
+    ids = ["1:10", "2:20", "3:30", "1:10", "2:20", "3:30"]
+    assert apply_mod.find_duplicate_ranges(ids) == [(3, 6)]
+
+
+def test_find_duplicate_ranges_scattered_and_triple():
+    ids = ["1:10", "1:10", "2:20", "1:10", "3:30"]
+    assert apply_mod.find_duplicate_ranges(ids) == [(1, 2), (3, 4)]
+
+
+def test_dedupe_playlists_dry_run_does_not_delete():
+    client = FakeClient()
+    client.playlists[100].tracks = [FakeTrackShort("1:10"), FakeTrackShort("2:20"), FakeTrackShort("1:10")]
+
+    apply_mod.dedupe_playlists(client, delay=0, dry_run=True)
+
+    assert len(client.playlists[100].tracks) == 3, "дубли не должны удаляться в dry-run режиме"
+
+
+def test_dedupe_playlists_removes_duplicate_block():
+    client = FakeClient()
+    client.playlists[100].tracks = [
+        FakeTrackShort("1:10"),
+        FakeTrackShort("2:20"),
+        FakeTrackShort("1:10"),
+        FakeTrackShort("2:20"),
+    ]
+
+    apply_mod.dedupe_playlists(client, delay=0, dry_run=False)
+
+    remaining = [t.track_id for t in client.playlists[100].tracks]
+    assert remaining == ["1:10", "2:20"], "должна остаться только первая копия каждого трека"

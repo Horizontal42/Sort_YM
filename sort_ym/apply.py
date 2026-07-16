@@ -155,3 +155,70 @@ def apply_classification(
         if failed:
             summary += f", ошибок {failed}"
         print(summary)
+
+
+def find_duplicate_ranges(track_ids: list[str]) -> list[tuple[int, int]]:
+    """Индексы всех повторных вхождений track_id (кроме первого), сгруппированные в
+    непрерывные диапазоны [from, to) - в формате, который ожидает delete_track."""
+    seen: set[str] = set()
+    dup_indices: list[int] = []
+    for i, tid in enumerate(track_ids):
+        if tid in seen:
+            dup_indices.append(i)
+        else:
+            seen.add(tid)
+
+    ranges: list[tuple[int, int]] = []
+    for i in dup_indices:
+        if ranges and ranges[-1][1] == i:
+            ranges[-1] = (ranges[-1][0], i + 1)
+        else:
+            ranges.append((i, i + 1))
+    return ranges
+
+
+def dedupe_playlists(client: Client, delay: float, dry_run: bool = True) -> None:
+    """Убирает повторные вставки одного и того же трека в плейлистах (см. _existing_track_ids).
+
+    Удаление позиционное (from/to индекс), поэтому при сетевой ошибке не повторяем вслепую -
+    индексы могли уже сдвинуться. Просто прерываем обработку этого плейлиста; повторный запуск
+    dedupe безопасен и идемпотентен, так как каждый раз пересчитывает диапазоны от актуального
+    состояния плейлиста.
+    """
+    playlists = with_retries(lambda: client.users_playlists_list())
+
+    total_ranges = 0
+    total_tracks = 0
+    for playlist in playlists:
+        full = with_retries(lambda: client.users_playlists(playlist.kind))
+        if full is None:
+            print(f"  не удалось прочитать «{playlist.title}», пропускаю")
+            continue
+
+        ids = [t.track_id for t in full.tracks]
+        ranges = find_duplicate_ranges(ids)
+        if not ranges:
+            continue
+
+        n = sum(to - frm for frm, to in ranges)
+        total_ranges += len(ranges)
+        total_tracks += n
+
+        if dry_run:
+            print(f"{playlist.title}: найдено дублей {n} ({len(ranges)} диапазон(ов))")
+            continue
+
+        revision = full.revision or 1
+        for frm, to in sorted(ranges, key=lambda r: -r[0]):
+            updated = client.users_playlists_delete_track(playlist.kind, frm, to, revision=revision)
+            revision = updated.revision if updated is not None and updated.revision is not None else revision + 1
+            time.sleep(delay)
+        print(f"{playlist.title}: удалено {n} дублей")
+
+    if dry_run:
+        if total_tracks:
+            print(f"\nВсего дублей найдено: {total_tracks} в {total_ranges} диапазон(ов). Запустите с --yes для удаления.")
+        else:
+            print("\nДублей не найдено.")
+    else:
+        print(f"\nВсего удалено дублей: {total_tracks}")
