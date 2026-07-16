@@ -105,7 +105,10 @@ def apply_classification(
         no_album = 0
         failed = 0
         for row in playlist_rows:
-            track_key = f"{row['id']}:{row['album_id']}" if row["album_id"] else str(row["id"])
+            # Сервер никогда не возвращает albumId у треков в плейлисте (Track.album_id всегда
+            # None при чтении, проверено вживую на десятках плейлистов, включая чужие) - track_id
+            # всегда голый id. albumId нужен только для самой вставки, не для сравнения.
+            track_key = str(row["id"])
             if track_key in already:
                 continue
 

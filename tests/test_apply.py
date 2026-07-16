@@ -18,7 +18,9 @@ class FakeTrackShort:
 
 class FakeClient:
     def __init__(self):
-        self.playlists = {100: FakePlaylist(100, "Рок — RU", revision=5, tracks=[FakeTrackShort("1:10")])}
+        # Сервер никогда не возвращает albumId у треков плейлиста - track_id всегда голый id
+        # (проверено вживую), поэтому фейк тоже хранит только id, без ":album_id".
+        self.playlists = {100: FakePlaylist(100, "Рок — RU", revision=5, tracks=[FakeTrackShort("1")])}
         self.created = []
         self.inserted = []
         self.next_kind = 200
@@ -57,7 +59,7 @@ class FlakyClient:
         return [self.playlist]
 
     def users_playlists(self, kind):
-        self.playlist.tracks = [FakeTrackShort(f"{i}:{a}") for (i, a) in self.server_tracks]
+        self.playlist.tracks = [FakeTrackShort(str(i)) for (i, a) in self.server_tracks]
         return self.playlist
 
     def users_playlists_insert_track(self, kind, track_id, album_id, revision=1):
@@ -66,7 +68,7 @@ class FlakyClient:
         if self.insert_calls == 1:
             raise TimedOutError()
         self.playlist.revision += 1
-        self.playlist.tracks = [FakeTrackShort(f"{i}:{a}") for (i, a) in self.server_tracks]
+        self.playlist.tracks = [FakeTrackShort(str(i)) for (i, a) in self.server_tracks]
         return self.playlist
 
 
