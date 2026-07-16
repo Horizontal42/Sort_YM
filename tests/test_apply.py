@@ -135,3 +135,47 @@ def test_apply_continues_after_bad_request_on_single_track():
     apply_mod.apply_classification(client, rows, delay=0)
 
     assert client.inserted == [(200, 2, 20, 1)], "второй трек должен вставиться, несмотря на ошибку первого"
+
+
+class NoneOnceClient(FakeClient):
+    """users_playlists возвращает None (сбой разбора ответа) на первой попытке, затем нормальные данные."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def users_playlists(self, kind):
+        self.calls += 1
+        if self.calls == 1:
+            return None
+        return super().users_playlists(kind)
+
+
+def test_apply_retries_on_none_response_instead_of_treating_as_empty_playlist(monkeypatch):
+    # Регрессия: client.users_playlists() тихо возвращает None при любом сбое разбора ответа
+    # (не только когда плейлиста реально не существует). Раньше это трактовалось как "плейлист
+    # пуст", и apply вставлял поверх уже существующих треков дубли.
+    monkeypatch.setattr(apply_mod.time, "sleep", lambda s: None)
+    client = NoneOnceClient()
+    rows = [{"target_playlist": "Рок — RU", "id": 1, "album_id": 10}]
+
+    apply_mod.apply_classification(client, rows, delay=0)
+
+    assert client.inserted == [], "трек уже был в плейлисте, дубль вставляться не должен"
+
+
+class AlwaysNoneClient(FakeClient):
+    def users_playlists(self, kind):
+        return None
+
+
+def test_apply_raises_instead_of_silently_treating_persistent_none_as_empty(monkeypatch):
+    monkeypatch.setattr(apply_mod.time, "sleep", lambda s: None)
+    client = AlwaysNoneClient()
+    rows = [{"target_playlist": "Рок — RU", "id": 1, "album_id": 10}]
+
+    try:
+        apply_mod.apply_classification(client, rows, delay=0)
+        assert False, "должно было упасть, а не молча решить, что плейлист пуст"
+    except RuntimeError:
+        pass

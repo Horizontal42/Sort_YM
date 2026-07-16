@@ -13,11 +13,30 @@ def _existing_playlists_by_title(client: Client) -> dict[str, Playlist]:
     return {p.title: p for p in playlists if p.title}
 
 
-def _existing_track_ids(client: Client, playlist: Playlist) -> set[str]:
-    full = with_retries(lambda: client.users_playlists(playlist.kind))
-    if full is None:
-        return set()
-    return {t.track_id for t in full.tracks}
+def _existing_track_ids(client: Client, playlist: Playlist, max_attempts: int = 4) -> set[str]:
+    """Возвращает set track_id уже находящихся в плейлисте треков.
+
+    client.users_playlists(kind) может вернуть None не только когда плейлиста не существует,
+    но и при любом сбое разбора ответа (усечённое/повреждённое тело при 200 OK) - это тихий
+    фолбэк библиотеки, а не исключение, поэтому with_retries его не перехватывает. Плейлист
+    только что получен из users_playlists_list(), так что None здесь почти наверняка означает
+    именно такой сбой, а не "плейлист пуст". Раньше это тихо трактовалось как пустой плейлист,
+    из-за чего apply_classification вставлял все треки заново поверх уже существующих (дубли).
+    Теперь повторяем запрос и, если так и не получили данные, падаем явно вместо угадывания.
+    """
+    for attempt in range(max_attempts):
+        full = with_retries(lambda: client.users_playlists(playlist.kind))
+        if full is not None:
+            return {t.track_id for t in full.tracks}
+        if attempt < max_attempts - 1:
+            wait = 2.0 * (2**attempt)
+            print(f"  пустой ответ при чтении плейлиста «{playlist.title}», повтор через {wait:.0f}с...")
+            time.sleep(wait)
+
+    raise RuntimeError(
+        f"не удалось прочитать содержимое плейлиста «{playlist.title}» (kind={playlist.kind}) "
+        "после нескольких попыток - прерываю, чтобы не вставить треки повторно поверх существующих"
+    )
 
 
 def _get_or_create_playlist(client: Client, title: str, existing: dict[str, Playlist]) -> Playlist:
