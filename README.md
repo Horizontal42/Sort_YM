@@ -1,123 +1,125 @@
+[Русский](README.ru.md)
+
 # Sort YM
 
-Раскладывает лайкнутые треки Яндекс.Музыки по плейлистам вида `Жанр — RU` / `Жанр — INT`.
+Sorts your Yandex Music liked tracks into playlists named `Genre — RU` / `Genre — INT`.
 
 ```
 $ python -m sort_ym report
 
-Распределение по плейлистам:
-  Рок — INT: 143
-  Рок — RU: 287
-  Рэп — RU: 512
+Playlist breakdown:
+  Rock — INT: 143
+  Rock — RU: 287
+  Rap — RU: 512
   ...
 
-Отчёт сохранён: out/report.csv
+Report saved: out/report.csv
 ```
 
-## Установка
+## Install
 
-Требования: Python 3.11+ (используется `tomllib` из стандартной библиотеки), Windows/Linux/macOS, доступ в интернет.
+Requirements: Python 3.11+ (uses `tomllib` from the standard library), Windows/Linux/macOS, internet access.
 
 ```
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 ```
 
-Для разработки (тесты):
+For development (tests):
 
 ```
 .venv\Scripts\pip install -r requirements-dev.txt
 ```
 
-## Что делает
+## What it does
 
 ```
-.venv\Scripts\python -m sort_ym auth                    # войти в аккаунт Яндекса через device-flow и сохранить токен в .token
-.venv\Scripts\python -m sort_ym fetch                   # скачать лайкнутые треки (cache/tracks.json) и жанры их артистов (cache/artist_genres.json); аккаунт не меняет
-.venv\Scripts\python -m sort_ym report                  # посчитать жанр и язык каждого трека, сохранить out/report.csv (аккаунт не меняет)
-.venv\Scripts\python -m sort_ym apply --limit 20 --yes  # пробный запуск: создать плейлисты и добавить в них первые 20 треков
-.venv\Scripts\python -m sort_ym apply --yes             # создать плейлисты и добавить в них все треки (меняет аккаунт)
+.venv\Scripts\python -m sort_ym auth                    # log in to a Yandex account via device-flow and save the token to .token
+.venv\Scripts\python -m sort_ym fetch                   # download liked tracks (cache/tracks.json) and their artists' genres (cache/artist_genres.json); does not change the account
+.venv\Scripts\python -m sort_ym report                  # compute genre and language per track, save out/report.csv (does not change the account)
+.venv\Scripts\python -m sort_ym apply --limit 20 --yes  # dry run: create playlists and add the first 20 tracks
+.venv\Scripts\python -m sort_ym apply --yes             # create playlists and add all tracks (changes the account)
 ```
 
-При повторных запусках `fetch` докачивает только новые треки, а `apply` не дублирует уже добавленные треки.
+On repeated runs `fetch` only downloads new tracks, and `apply` does not duplicate tracks already added.
 
-## Полная очистка кэша
+## Full cache cleanup
 
-Если требуется начать с чистого листа (переполучить все данные с нуля), удалите папку `cache/`:
+To start over from scratch (re-fetch everything), delete the `cache/` folder:
 
 ```
 Remove-Item -Recurse -Force cache
 ```
 
-Кэш состоит из четырёх файлов:
-- `cache/tracks.json` — список лайкнутых треков и их метаданные (включая id артистов);
-- `cache/artist_genres.json` — жанровые теги каждого артиста (может быть несколько на артиста);
-- `cache/genre_catalog.json` — снимок дерева жанров Яндекса на момент последнего запуска;
-- `cache/lyrics_lang.json` — определённые языки текстов для каждого трека.
+The cache consists of four files:
+- `cache/tracks.json` — liked tracks and their metadata (including artist ids);
+- `cache/artist_genres.json` — genre tags for each artist (an artist can have several);
+- `cache/genre_catalog.json` — a snapshot of Yandex's genre tree as of the last run;
+- `cache/lyrics_lang.json` — detected lyrics language per track.
 
-Удаление `cache/` заставит `fetch` и `report` переполучить всё с нуля при следующем запуске.
+Deleting `cache/` makes `fetch` and `report` re-fetch everything from scratch on the next run.
 
-Также можно удалить сгенерированный отчёт:
+You can also delete the generated report:
 
 ```
 Remove-Item -Recurse -Force out
 ```
 
-Это просто результаты анализа, их удаление не повлияет на следующий запуск `report`.
+It's just analysis output — deleting it doesn't affect the next `report` run.
 
-**Важно:** файл `.token` (OAuth-токен) не входит в кэш и не удаляется при очистке `cache/`. Очистка кэша вас не разлогирует. Если нужна повторная авторизация, удалите `.token` отдельно:
+**Important:** the `.token` file (OAuth token) is not part of the cache and is not removed by clearing `cache/`. Clearing the cache does not log you out. To force re-authentication, delete `.token` separately:
 
 ```
 Remove-Item .token
 ```
 
-## Как определяется жанр и язык
+## How genre and language are determined
 
-- **Жанр** определяется на **под-жанровом** уровне (Рок, Панк, Инди, Альтернатива, Метал, ...,
-  не только 11 крупных групп), комбинируя два сигнала:
-  1. Жанр **альбома** трека (`genre_raw`) — сигнал по конкретному треку.
-  2. Жанры **артиста** (`Artist.genres`, может быть несколько тегов на артиста, точнее одного
-     альбомного жанра) — сигнал по исполнителю в целом.
+- **Genre** is determined at the **sub-genre** level (Rock, Punk, Indie, Alternative, Metal, ...,
+  not just the 11 top-level buckets), combining two signals:
+  1. The track's **album** genre (`genre_raw`) — a per-track signal.
+  2. The **artist's** genres (`Artist.genres`, an artist can have several tags, more precise than
+     a single album genre) — a per-artist signal.
 
-  Если сигналы совпадают — берётся под-жанр как есть. При конфликте: если альбомный тег общий
-  ("зонтичный", вроде `rock`/`alternative`/`pop` — типичный дефолт Яндекса низкой уверенности) —
-  побеждает жанр артиста; если альбомный тег точный/специфичный (`numetal`, `dnb`, `shanson`) —
-  побеждает он, потому что это, скорее всего, реальный эксперимент артиста в другом жанре, а не шум.
-  Так один и тот же артист с разными по духу треками (например, рОк-трек и панк-трек) раскладывается
-  по разным плейлистам, а не весь скопом по одному "основному" жанру.
+  If the signals agree, the sub-genre is used as is. On conflict: if the album tag is generic
+  ("umbrella-like", such as `rock`/`alternative`/`pop` — Yandex's typical low-confidence default),
+  the artist's genre wins; if the album tag is precise/specific (`numetal`, `dnb`, `shanson`), it
+  wins, because it's more likely a genuine genre experiment by the artist rather than noise. This
+  way the same artist with tracks of different character (say, a rock track and a punk track) ends
+  up in different playlists instead of everything being lumped into one "main" genre.
 
-  Под-жанровые группы меньше `small_group_min` (по умолчанию 12 треков, `config.toml`) схлопываются
-  в родительскую крупную корзину (Поп, Рок, Метал, Рэп, Электроника, Джаз и блюз, Классика, Фолк и
-  world, Инди и альтернатива, Саундтреки, Разное), чтобы не плодить плейлисты на 1-2 трека.
-  Реализация — `sort_ym/genres.py` (`classify_track`, `ROOT_BUCKET`) — таблица корней легко
-  дополняется, если Яндекс вернёт незнакомый корневой жанр.
+  Sub-genre groups smaller than `small_group_min` (12 tracks by default, `config.toml`) collapse
+  into the parent top-level bucket (Pop, Rock, Metal, Rap, Electronic, Jazz & Blues, Classical,
+  Folk & World, Indie & Alternative, Soundtracks, Other) to avoid playlists with 1-2 tracks.
+  Implementation — `sort_ym/genres.py` (`classify_track`, `ROOT_BUCKET`) — the root table is easy
+  to extend if Yandex returns an unfamiliar root genre.
 
-- **Язык** — гибрид:
-  1. Если у трека есть текст песни — реальный язык из API (`ru` → RU, иначе → INT).
-  2. Иначе — подсказка по жанру (`rusrap`, `shanson`, `bard`, ...).
-  3. Иначе — по алфавиту названия/исполнителя (кириллица/латиница).
-  4. Если ничего не сработало — трек попадает в `... — Не определено`.
+- **Language** is a hybrid:
+  1. If the track has lyrics — the real language from the API (`ru` → RU, otherwise → INT).
+  2. Otherwise — a genre-based hint (`rusrap`, `shanson`, `bard`, ...).
+  3. Otherwise — an alphabet heuristic on the title/artist (Cyrillic/Latin).
+  4. If nothing matched — the track goes into `... — Undetermined`.
 
-После `report` в консоли также печатается список нераспознанных жанров (попавших в «Разное»),
-чтобы можно было дополнить таблицу в `sort_ym/genres.py`.
+After `report`, the console also prints a list of unrecognized genres (that fell into "Other") so
+the table in `sort_ym/genres.py` can be extended.
 
 ## Handy things
 
-- Первый прогон `apply` делайте с `--limit 20 --yes` и проверьте результат в приложении, прежде
-  чем запускать на все ~2000 треков.
-- Настройки задержек между запросами — в `config.toml` (`[throttle]`).
-- Минимальный размер под-жанрового плейлиста — `config.toml` (`[classify] small_group_min`).
+- Run `apply` first with `--limit 20 --yes` and check the result in the app before running it
+  against all ~2000 tracks.
+- Delays between requests are configured in `config.toml` (`[throttle]`).
+- The minimum sub-genre playlist size is `config.toml` (`[classify] small_group_min`).
 
-## Риски (неофициальный API)
+## Risks (unofficial API)
 
-Официального API для личной библиотеки Яндекс.Музыки нет — инструмент использует
-неофициальную библиотеку `yandex-music`. OAuth-токен в `.token` даёт полный доступ к аккаунту
-Яндекса — храните его локально и не публикуйте. Инструмент выполняет только безопасные действия
-(чтение лайков, создание плейлистов, добавление треков) и ничего не удаляет.
+There is no official API for personal Yandex Music library access — this tool uses the
+unofficial `yandex-music` library. The OAuth token in `.token` grants full access to your Yandex
+account — keep it local and never publish it. The tool only performs safe actions (reading likes,
+creating playlists, adding tracks) and never deletes anything.
 
 ## For developers
 
-Python 3.11+, `yandex-music==3.0.0`, стандартная библиотека (`tomllib`, `csv`, `unicodedata`).
+Python 3.11+, `yandex-music==3.0.0`, standard library (`tomllib`, `csv`, `unicodedata`).
 
 ```
 .venv\Scripts\python -m pytest tests/ -v
@@ -127,4 +129,12 @@ Python 3.11+, `yandex-music==3.0.0`, стандартная библиотека
 .venv\Scripts\python -m sort_ym apply --limit 20 --yes
 ```
 
-Структура кода и поток данных — в [ARCHITECTURE.md](ARCHITECTURE.md).
+Code structure and data flow are in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Credits
+
+Andrew Pimenov
+
+## License
+
+[MIT License](LICENSE)

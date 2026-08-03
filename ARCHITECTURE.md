@@ -1,107 +1,109 @@
-# Архитектура
+[Русский](ARCHITECTURE.ru.md)
 
-Консольная утилита на Python, которая читает лайкнутые треки Яндекс.Музыки и раскладывает их
-по плейлистам вида `Жанр — RU` / `Жанр — INT`, используя неофициальную библиотеку `yandex-music`.
+# Architecture
 
-## Структура
+A Python console utility that reads Yandex Music liked tracks and sorts them into playlists named
+`Genre — RU` / `Genre — INT`, using the unofficial `yandex-music` library.
+
+## Structure
 
 ```
 sort_ym/
-  config.py     — чтение config.toml (throttle, small_group_min, пути к кэшу/токену)
-  auth.py       — OAuth device-flow, хранение токена в .token
-  ymclient.py   — создание Client, батч-нарезка списков, ретраи сетевых ошибок
-  fetch.py      — лайки -> полные Track -> cache/tracks.json; артисты треков ->
-                  client.artists() -> cache/artist_genres.json (оба докачиваются инкрементально)
-  genres.py     — реальное дерево жанров Яндекса; classify_track — сведение жанра трека и жанров
-                  артиста в один под-жанр (root_id); ROOT_BUCKET — под-жанр -> 11 крупных корзин
-  language.py   — гибридная детекция языка (API текста / жанр-подсказка / алфавит)
-  classify.py   — (под-жанр | крупная корзина, язык) -> имя плейлиста
-  report.py     — двухпроходная сборка строк отчёта, запись out/report.csv, сводки
-  apply.py      — создание плейлистов + идемпотентное добавление треков
-  cli.py        — команды auth / fetch / report / apply
+  config.py     — reads config.toml (throttle, small_group_min, cache/token paths)
+  auth.py       — OAuth device-flow, token storage in .token
+  ymclient.py   — Client construction, batching lists, retrying network errors
+  fetch.py      — likes -> full Track -> cache/tracks.json; track artists ->
+                  client.artists() -> cache/artist_genres.json (both fetched incrementally)
+  genres.py     — the real Yandex genre tree; classify_track — resolves track genre and artist
+                  genres into a single sub-genre (root_id); ROOT_BUCKET — sub-genre -> 11 top-level buckets
+  language.py   — hybrid language detection (lyrics API / genre hint / alphabet)
+  classify.py   — (sub-genre | top-level bucket, language) -> playlist name
+  report.py     — two-pass report row building, writes out/report.csv, summaries
+  apply.py      — playlist creation + idempotent track insertion
+  cli.py        — auth / fetch / report / apply commands
 
 tests/
-  test_genres.py — classify_track, dominant, bucket_for, дерево жанров
-  test_language.py — детекция языка
-  test_report.py — двухпроходное схлопывание мелких под-жанровых групп
-  test_fetch.py, test_apply.py — кэш треков/артистов, идемпотентность применения
+  test_genres.py — classify_track, dominant, bucket_for, genre tree
+  test_language.py — language detection
+  test_report.py — two-pass collapsing of small sub-genre groups
+  test_fetch.py, test_apply.py — track/artist cache, apply idempotency
 
-cache/  — кэш API (в .gitignore)
-out/    — отчёты (в .gitignore)
+cache/  — API cache (in .gitignore)
+out/    — reports (in .gitignore)
 ```
 
-## Поток данных
+## Data flow
 
 ```
 auth  → .token
 fetch → users_likes_tracks() → client.tracks(batch) → cache/tracks.json (+ artist_ids)
-      → client.artists(batch) по уникальным artist_ids → cache/artist_genres.json
+      → client.artists(batch) over unique artist_ids → cache/artist_genres.json
 report → genres.load_or_fetch_catalog() → cache/genre_catalog.json
        → language.fetch_api_languages() → cache/lyrics_lang.json
-       → build_rows(): проход 1 — classify_track() на каждый трек (genre_raw + жанры артиста)
-                        проход 2 — группы < small_group_min схлопываются в крупную корзину
-       → out/report.csv (dry-run, аккаунт не меняется)
+       → build_rows(): pass 1 — classify_track() per track (genre_raw + artist genres)
+                        pass 2 — groups < small_group_min collapse into the top-level bucket
+       → out/report.csv (dry-run, account unchanged)
 apply --yes → users_playlists_create / users_playlists_insert_track
 ```
 
-## Ключевые решения
+## Key decisions
 
-- **Жанр трека** доступен только через альбом (`Track.albums[0].genre`), у самого трека поля
-  жанра нет — это одна строка на трек, часто общая (`rock`, `alternative`). Раскладка по корзинам
-  сделана через реальное дерево `client.genres()` (родитель → под-жанры), а не через угаданный
-  список слагов — таблица `ROOT_BUCKET` в `genres.py` опирается на подтверждённые id, а не на
-  предположения. Жанры без совпадения падают в корзину `other` и печатаются в выводе `report` для
-  ручного дополнения таблицы.
+- **Track genre** is only available through the album (`Track.albums[0].genre`) — the track itself
+  has no genre field, so it's one string per track, often generic (`rock`, `alternative`). Bucketing
+  is done through the real `client.genres()` tree (parent → sub-genres), not a guessed slug list —
+  the `ROOT_BUCKET` table in `genres.py` relies on confirmed ids, not assumptions. Genres without a
+  match fall into the `other` bucket and are printed in `report`'s output for manual table extension.
 
-- **Под-жанровая классификация (`genres.classify_track`)**: жанр трека — это одна строка на альбом
-  и часто общая. У артиста же (`client.artists()`, батч-эндпоинт) может быть несколько тегов,
-  точнее одного альбомного. `classify_track(genre_raw, artist_genre_lists, catalog)` сводит оба
-  сигнала в один под-жанр (`root_id`, например `punk`/`indie`/`allrock`) на уровне **трека**, а не
-  артиста — так один и тот же артист с разными по духу треками раскладывается по разным плейлистам:
-  1. Согласие сигналов (жанр трека есть среди жанров артиста) → берём его — гранулярно по треку.
-  2. У трека нет жанра → берём самый частый (`dominant`) жанр среди артистов трека.
-  3. У артиста(ов) нет тегов → берём жанр трека.
-  4. Конфликт: альбомный тег общий/"зонтичный" (`GENERIC_SLUGS`: `rock`, `alternative`, `pop`, ... —
-     дефолт Яндекса низкой уверенности) → побеждает жанр артиста (`dominant` по объединённым тегам
-     всех артистов трека, тай-брейк — по порядку появления). Альбомный тег точный/специфичный
-     (`numetal`, `dnb`, ...) → побеждает он — вероятный настоящий эксперимент артиста в другом
-     жанре, а не шум, который стоило бы поправить.
+- **Sub-genre classification (`genres.classify_track`)**: track genre is one string per album and
+  often generic. An artist (`client.artists()`, a batch endpoint) can have several tags, more
+  precise than a single album genre. `classify_track(genre_raw, artist_genre_lists, catalog)`
+  resolves both signals into a single sub-genre (`root_id`, e.g. `punk`/`indie`/`allrock`) at the
+  **track** level, not the artist level — so the same artist with tracks of different character ends
+  up in different playlists:
+  1. Signals agree (track genre is among the artist's genres) → use it — granular per track.
+  2. Track has no genre → use the most frequent (`dominant`) genre among the track's artists.
+  3. Artist(s) have no tags → use the track's genre.
+  4. Conflict: the album tag is generic/"umbrella" (`GENERIC_SLUGS`: `rock`, `alternative`, `pop`,
+     ... — Yandex's low-confidence default) → the artist's genre wins (`dominant` over the combined
+     tags of all the track's artists, tie-break by order of appearance). The album tag is
+     precise/specific (`numetal`, `dnb`, ...) → it wins — likely a genuine genre experiment by the
+     artist rather than noise worth correcting.
 
-  Результат (`fine`) — двухпроходно схлопывается в `report.build_rows`: сначала считаются размеры
-  групп `(fine, lang)`, затем группы меньше `config.small_group_min` переезжают в родительскую
-  крупную корзину через `genres.coarse_of(fine)` (тонкая обёртка над `ROOT_BUCKET`). Проход
-  одиночный (не итеративный) — `coarse_of` детерминирована от `fine`, поэтому пересчёта размеров и
-  зацикливания нет.
+  The result (`fine`) is collapsed in a two-pass process in `report.build_rows`: first the sizes of
+  `(fine, lang)` groups are counted, then groups smaller than `config.small_group_min` move to the
+  parent top-level bucket via `genres.coarse_of(fine)` (a thin wrapper over `ROOT_BUCKET`). The pass
+  is single (not iterative) — `coarse_of` is deterministic from `fine`, so there's no re-counting of
+  sizes or looping.
 
-- **Язык** определяется гибридно, в порядке приоритета:
-  1. `client.track_supplement(track_id).lyrics.text_language` — единственное поле в библиотеке
-     с реальным языком текста песни. Оно есть только в устаревшем (deprecated) методе
-     `track_supplement`, а не в новом `tracks_lyrics()` — тот текст возвращает, но язык не отдаёт.
-     Используется сознательно, несмотря на пометку deprecated в самой библиотеке.
-  2. Подсказка по слагу жанра (`rusrap`, `shanson`, `bard`, ...).
-  3. Эвристика по алфавиту названия/исполнителя (кириллица vs латиница, `unicodedata`).
-  4. Иначе — `UNKNOWN` → отдельный плейлист «Не определено».
+- **Language** is determined hybrid, in priority order:
+  1. `client.track_supplement(track_id).lyrics.text_language` — the only field in the library with
+     the actual lyrics language. It's only present in the deprecated `track_supplement` method, not
+     in the newer `tracks_lyrics()` — that one returns the text but not the language. Used
+     deliberately despite the library's own deprecation notice.
+  2. A genre-slug hint (`rusrap`, `shanson`, `bard`, ...).
+  3. An alphabet heuristic on the title/artist (Cyrillic vs Latin, `unicodedata`).
+  4. Otherwise — `UNKNOWN` → a separate "Undetermined" playlist.
 
-- **Идентификаторы треков**: у трека есть composite `track_id` (`"id:album_id"`, используется как
-  ключ кэша и для сверки с уже добавленными треками в плейлисте) и отдельные `id`/`album_id`
-  (нужны как раздельные параметры для `track_supplement`, `tracks_lyrics` и
-  `users_playlists_insert_track`).
+- **Track identifiers**: a track has a composite `track_id` (`"id:album_id"`, used as the cache key
+  and to check against tracks already in a playlist) and separate `id`/`album_id` (needed as
+  separate parameters for `track_supplement`, `tracks_lyrics`, and `users_playlists_insert_track`).
 
-- **Идемпотентность `apply`**: перед добавлением треков в плейлист читается его текущий состав
-  (`users_playlists(kind)`), уже присутствующие треки пропускаются. Повторный запуск `apply`
-  безопасен и не создаёт дублей. Лайки не трогаются, ничего не удаляется.
+- **`apply` idempotency**: before adding tracks to a playlist, its current contents are read
+  (`users_playlists(kind)`), and tracks already present are skipped. Re-running `apply` is safe and
+  creates no duplicates. Likes are never touched, nothing is ever deleted.
 
-- **Троттлинг и резюмируемость**: все сетевые циклы (загрузка треков, языков) делают паузу между
-  запросами (`config.toml`, `[throttle]`) и пишут кэш атомарно (temp-файл + rename) после каждого
-  батча — прерванный прогон можно просто перезапустить, уже полученное не запрашивается повторно.
+- **Throttling and resumability**: every network loop (fetching tracks, languages) pauses between
+  requests (`config.toml`, `[throttle]`) and writes the cache atomically (temp file + rename) after
+  each batch — an interrupted run can simply be restarted, and already-fetched data is not
+  requested again.
 
-## Хранилище
+## Storage
 
-- `.token` — OAuth-токен аккаунта (не коммитится).
-- `cache/tracks.json` — метаданные лайкнутых треков, включая `artist_ids` (id артистов трека).
-- `cache/artist_genres.json` — `{artist_id: {name, genres: [slug, ...]}}`, один и более жанров
-  на артиста.
-- `cache/genre_catalog.json` — плоский снимок дерева жанров Яндекса (id -> title, root_id).
-- `cache/lyrics_lang.json` — язык текста песни по треку (id -> language code | null).
-- `out/report.csv` — предпросмотр распределения по плейлистам перед `apply` (включая колонку
-  `fine_bucket` — под-жанр до возможного схлопывания в крупную корзину).
+- `.token` — the account's OAuth token (not committed).
+- `cache/tracks.json` — liked track metadata, including `artist_ids` (the track's artist ids).
+- `cache/artist_genres.json` — `{artist_id: {name, genres: [slug, ...]}}`, one or more genres per
+  artist.
+- `cache/genre_catalog.json` — a flat snapshot of Yandex's genre tree (id -> title, root_id).
+- `cache/lyrics_lang.json` — lyrics language per track (id -> language code | null).
+- `out/report.csv` — a preview of the playlist breakdown before `apply` (including the
+  `fine_bucket` column — the sub-genre before any collapsing into a top-level bucket).
