@@ -39,6 +39,7 @@ For development (tests):
 .venv\Scripts\python -m sort_ym report                  # compute genre and language per track, save out/report.csv (does not change the account)
 .venv\Scripts\python -m sort_ym apply --limit 20 --yes  # dry run: create playlists and add the first 20 tracks
 .venv\Scripts\python -m sort_ym apply --yes             # create playlists and add all tracks (changes the account)
+.venv\Scripts\python -m sort_ym digest                  # library summary (top artists, genres) to out/digest.md - to paste into an LLM chat; no network used
 ```
 
 On repeated runs `fetch` only downloads new tracks, and `apply` does not duplicate tracks already added.
@@ -59,13 +60,13 @@ The cache consists of four files:
 
 Deleting `cache/` makes `fetch` and `report` re-fetch everything from scratch on the next run.
 
-You can also delete the generated report:
+You can also delete the generated reports (`out/report.csv`, `out/digest.md`):
 
 ```
 Remove-Item -Recurse -Force out
 ```
 
-It's just analysis output — deleting it doesn't affect the next `report` run.
+It's just analysis output — deleting it doesn't affect the next `report`/`digest` run.
 
 **Important:** the `.token` file (OAuth token) is not part of the cache and is not removed by clearing `cache/`. Clearing the cache does not log you out. To force re-authentication, delete `.token` separately:
 
@@ -103,12 +104,65 @@ Remove-Item .token
 After `report`, the console also prints a list of unrecognized genres (that fell into "Other") so
 the table in `sort_ym/genres.py` can be extended.
 
+## Digest for an LLM
+
+An LLM can't digest a full per-track dump of ~2000 tracks as well as a compact summary — so
+`digest` doesn't export tracks line by line, it aggregates the library into a few sections with
+hard size ceilings: at most 11 lines for top-level genres, ~34 for sub-genres, 3 for languages,
+~13 for decades, and top artists/top albums are bounded by `config.toml`, not by library size.
+Anything past the top collapses into a single sentence with aggregate numbers. The resulting file
+stays a couple hundred lines at most, regardless of whether the library has 500 tracks or 10000.
+
+The command is fully offline: it makes no network calls and needs no `.token`, only the already
+downloaded `cache/`. `report` must have run at least once first (for `cache/genre_catalog.json`).
+
+```
+$ python -m sort_ym digest
+
+Genres:
+  Indie & Alternative: 680
+  Rock: 590
+  ...
+
+Digest saved: out/digest.md
+```
+
+Example `out/digest.md` (abridged):
+
+```
+## Genres (top-level buckets)
+- Indie & Alternative — 680 (34%): INT 571 / RU 108
+- Rock — 590 (29%): INT 518 / RU 72
+...
+
+## Decades
+- 2010s — 620 (31%): Rock 280, Indie & Alternative 200, Metal 90
+...
+
+## Top 40 artists
+1. Billy Talent — 66 (Rock; rock, punk)
+...
+1140 more artists with 1-4 tracks, 1737 mentions total; 835 of them with a single track.
+
+## Top 15 albums
+1. Slipknot — Iowa (2001) — 12
+...
+1401 more albums with 1-3 liked tracks. Tracks from albums with 2+ liked tracks: 732 of 2005 (37%).
+```
+
+**Important:** the `year` and `album title` fields weren't in the track cache from the start — if
+`cache/tracks.json` was created by an older version of `fetch`, the "Decades" and "Top albums"
+sections will show "Unknown" until the next `python -m sort_ym fetch` run (it re-downloads the
+whole cache once, then goes back to only fetching new tracks as usual).
+
 ## Handy things
 
 - Run `apply` first with `--limit 20 --yes` and check the result in the app before running it
   against all ~2000 tracks.
 - Delays between requests are configured in `config.toml` (`[throttle]`).
 - The minimum sub-genre playlist size is `config.toml` (`[classify] small_group_min`).
+- How many artists/albums the digest names individually — `config.toml` (`[digest] top_artists`,
+  `top_albums`) or the `digest` command's `--top`/`--top-albums` flags.
 
 ## Risks (unofficial API)
 
@@ -127,6 +181,7 @@ Python 3.11+, `yandex-music==3.0.0`, standard library (`tomllib`, `csv`, `unicod
 .venv\Scripts\python -m sort_ym fetch
 .venv\Scripts\python -m sort_ym report
 .venv\Scripts\python -m sort_ym apply --limit 20 --yes
+.venv\Scripts\python -m sort_ym digest
 ```
 
 Code structure and data flow are in [ARCHITECTURE.md](ARCHITECTURE.md).

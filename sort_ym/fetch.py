@@ -20,10 +20,14 @@ def _track_genre(track: Track) -> str | None:
 
 
 def _serialize(track: Track) -> dict:
-    album_id = track.albums[0].id if track.albums else None
+    # album_id, album_title и year берутся из одного и того же albums[0] - иначе название
+    # альбома может разъехаться с его id (у трека может быть несколько альбомов).
+    album = track.albums[0] if track.albums else None
     return {
         "id": track.id,
-        "album_id": album_id,
+        "album_id": album.id if album else None,
+        "album_title": (album.title or "") if album else "",
+        "year": album.year if album else None,
         "title": track.title or "",
         "artists": [a.name for a in track.artists if a.name],
         "artist_ids": [a.id for a in track.artists if a.name and a.id is not None],
@@ -61,9 +65,15 @@ def fetch_liked_tracks(
         return cache
 
     all_ids = likes.tracks_ids
-    # "not in cache" - трек ещё не загружен; "artist_ids" not in cache[tid] - трек загружен
-    # старой версией кэша (до добавления artist_ids) и должен быть докачан повторно.
-    missing_ids = [tid for tid in all_ids if tid not in cache or "artist_ids" not in cache[tid]]
+    # "not in cache" - трек ещё не загружен; "artist_ids"/"year" not in cache[tid] - трек загружен
+    # старой версией кэша (до добавления этих полей) и должен быть докачан повторно. Проверяем
+    # наличие ключа, а не правдивость значения - year легитимно может быть None у части альбомов,
+    # и тогда такой трек перекачивался бы при каждом fetch.
+    missing_ids = [
+        tid
+        for tid in all_ids
+        if tid not in cache or "artist_ids" not in cache[tid] or "year" not in cache[tid]
+    ]
 
     print(f"Лайкнутых треков: {len(all_ids)}, новых для загрузки: {len(missing_ids)}")
 

@@ -97,14 +97,23 @@ def flatten_catalog(roots: list[Genre]) -> dict[str, dict]:
     return flat
 
 
-def load_or_fetch_catalog(client: Client, cache_dir: Path) -> dict[str, dict]:
-    cache_dir.mkdir(parents=True, exist_ok=True)
+def load_catalog(cache_dir: Path) -> dict[str, dict]:
+    """Снимок дерева жанров только из кэша, без сети. {} если снимка ещё нет."""
     cache_file = cache_dir / GENRE_CATALOG_FILE
     if cache_file.exists():
         return json.loads(cache_file.read_text(encoding="utf-8"))
+    return {}
+
+
+def load_or_fetch_catalog(client: Client, cache_dir: Path) -> dict[str, dict]:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    flat = load_catalog(cache_dir)
+    if flat:
+        return flat
 
     roots = with_retries(lambda: client.genres())
     flat = flatten_catalog(roots)
+    cache_file = cache_dir / GENRE_CATALOG_FILE
     cache_file.write_text(json.dumps(flat, ensure_ascii=False, indent=2), encoding="utf-8")
     return flat
 

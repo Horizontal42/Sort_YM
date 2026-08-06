@@ -9,7 +9,8 @@ A Python console utility that reads Yandex Music liked tracks and sorts them int
 
 ```
 sort_ym/
-  config.py     — reads config.toml (throttle, small_group_min, cache/token paths)
+  config.py     — reads config.toml (throttle, small_group_min, top_artists/top_albums,
+                  cache/token paths)
   auth.py       — OAuth device-flow, token storage in .token
   ymclient.py   — Client construction, batching lists, retrying network errors
   fetch.py      — likes -> full Track -> cache/tracks.json; track artists ->
@@ -20,13 +21,16 @@ sort_ym/
   classify.py   — (sub-genre | top-level bucket, language) -> playlist name
   report.py     — two-pass report row building, writes out/report.csv, summaries
   apply.py      — playlist creation + idempotent track insertion
-  cli.py        — auth / fetch / report / apply commands
+  digest.py     — aggregated library summary (top artists, genres, decades, top albums)
+                  -> out/digest.md, fully offline
+  cli.py        — auth / fetch / report / apply / dedupe / digest commands
 
 tests/
   test_genres.py — classify_track, dominant, bucket_for, genre tree
   test_language.py — language detection
   test_report.py — two-pass collapsing of small sub-genre groups
   test_fetch.py, test_apply.py — track/artist cache, apply idempotency
+  test_digest.py — artist/album aggregation, long-tail collapsing, digest size bounds
 
 cache/  — API cache (in .gitignore)
 out/    — reports (in .gitignore)
@@ -44,6 +48,8 @@ report → genres.load_or_fetch_catalog() → cache/genre_catalog.json
                         pass 2 — groups < small_group_min collapse into the top-level bucket
        → out/report.csv (dry-run, account unchanged)
 apply --yes → users_playlists_create / users_playlists_insert_track
+digest → genres.load_catalog() + language.load_lang_cache() (cache only, no network)
+       → build_rows() → out/digest.md
 ```
 
 ## Key decisions
@@ -97,13 +103,37 @@ apply --yes → users_playlists_create / users_playlists_insert_track
   each batch — an interrupted run can simply be restarted, and already-fetched data is not
   requested again.
 
+- **Library digest (`digest.py`)**: the `digest` command's output is meant to be pasted into an LLM
+  chat, so it's built as a set of aggregates with fixed ceilings rather than a per-track dump — on a
+  ~2000-track library that's ~150 lines, regardless of whether the library has 500 tracks or 10000
+  (genre sections are bounded by the size of `ROOT_BUCKET`/`BUCKET_LABELS`; top artists and top
+  albums are bounded by the `[digest]` config, not the library size; anything past the top is
+  collapsed into a single sentence with aggregate numbers). Artists are counted **by name**, not via
+  `zip(artists, artist_ids)` — `fetch._serialize` puts every named artist into `artists` but only
+  those that also have an id into `artist_ids`, so the two lists can differ in length for a given
+  track. For the same reason, an artist's own genre tags (`artist_tags`) are only looked up from
+  tracks where the two lists' lengths match — otherwise an artist could end up with someone else's
+  tags. Rows from `report.build_rows()` are joined back to `cache/tracks.json` by the `(id,
+  album_id)` pair taken from the cache's **values**, not by reconstructing the key as
+  `f"{id}:{album_id}"` — the cache key is the original id from `likes.tracks_ids`, and for
+  album-less tracks it doesn't match that format. The album's year and title (`year`,
+  `album_title`) are read from the same `albums[0]` as `album_id` — otherwise the title could end up
+  paired with the wrong id. Old cache entries are backfilled with the same mechanism used for
+  `artist_ids`: the migration checks whether the `year` key is **present**, not whether its value is
+  truthy, otherwise tracks with a legitimately unknown year would be re-fetched on every `fetch` run.
+  The command is fully offline — it never constructs a `Client`, unlike `report`/`apply`.
+
 ## Storage
 
 - `.token` — the account's OAuth token (not committed).
-- `cache/tracks.json` — liked track metadata, including `artist_ids` (the track's artist ids).
+- `cache/tracks.json` — liked track metadata, including `artist_ids` (the track's artist ids),
+  `album_title` and `year` (the album's title and release year, `Album.title`/`Album.year`; `year`
+  can be `null`).
 - `cache/artist_genres.json` — `{artist_id: {name, genres: [slug, ...]}}`, one or more genres per
   artist.
 - `cache/genre_catalog.json` — a flat snapshot of Yandex's genre tree (id -> title, root_id).
 - `cache/lyrics_lang.json` — lyrics language per track (id -> language code | null).
 - `out/report.csv` — a preview of the playlist breakdown before `apply` (including the
   `fine_bucket` column — the sub-genre before any collapsing into a top-level bucket).
+- `out/digest.md` — a compact library summary for pasting into an LLM chat (top artists, top
+  albums, genre/language/decade breakdowns).

@@ -12,9 +12,11 @@ class FakeArtist:
 
 
 class FakeAlbum:
-    def __init__(self, id_, genre=None):
+    def __init__(self, id_, genre=None, title="", year=None):
         self.id = id_
         self.genre = genre
+        self.title = title
+        self.year = year
 
 
 class FakeTrack:
@@ -147,6 +149,68 @@ def test_fetch_re_downloads_old_cache_entries_missing_artist_ids(tmp_path: Path)
 
     assert "artist_ids" in cache["100:10"], "запись без artist_ids должна быть докачана заново"
     assert cache["100:10"]["artist_ids"] == [7]
+
+
+def test_fetch_re_downloads_old_cache_entries_missing_year(tmp_path: Path):
+    # Старый формат кэша (до добавления album_title/year, но уже с artist_ids) должен
+    # быть докачан повторно.
+    cache_dir = tmp_path
+    cache_dir.mkdir(exist_ok=True)
+    old_entry = {
+        "id": 100,
+        "album_id": 10,
+        "title": "Old",
+        "artists": ["Artist A"],
+        "artist_ids": [7],
+        "genre_raw": "pop",
+        "lyrics_available": False,
+    }
+    (cache_dir / fetch.TRACKS_CACHE_FILE).write_text(
+        json.dumps({"100:10": old_entry}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    track = FakeTrack(
+        id_=100,
+        albums=[FakeAlbum(10, title="Iowa", year=2001)],
+        artists=[FakeArtist(7, "Artist A")],
+    )
+    client = FakeClient(likes_ids=["100:10"], tracks_by_batch={("100:10",): [track]})
+
+    cache = fetch.fetch_liked_tracks(client, cache_dir, batch_size=100, batch_delay=0)
+
+    assert cache["100:10"]["year"] == 2001
+    assert cache["100:10"]["album_title"] == "Iowa"
+
+
+def test_fetch_does_not_redownload_entries_with_legitimately_unknown_year(tmp_path: Path):
+    # Регрессия: year=None легитимен (у альбома действительно нет года), и такая запись
+    # не должна перекачиваться при каждом fetch - проверяем наличие ключа, а не значение.
+    cache_dir = tmp_path
+    cache_dir.mkdir(exist_ok=True)
+    entry = {
+        "id": 100,
+        "album_id": 10,
+        "album_title": "Unknown Year Album",
+        "year": None,
+        "title": "T1",
+        "artists": ["Artist A"],
+        "artist_ids": [7],
+        "genre_raw": "pop",
+        "lyrics_available": False,
+    }
+    (cache_dir / fetch.TRACKS_CACHE_FILE).write_text(
+        json.dumps({"100:10": entry}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    def boom(batch):
+        raise AssertionError(f"не должен перекачивать трек с легитимно неизвестным годом: {batch}")
+
+    client = FakeClient(likes_ids=["100:10"], tracks_by_batch={})
+    client.tracks = boom
+
+    cache = fetch.fetch_liked_tracks(client, cache_dir, batch_size=100, batch_delay=0)
+
+    assert cache["100:10"]["year"] is None
 
 
 def test_fetch_artist_genres_batches_and_caches(tmp_path: Path):

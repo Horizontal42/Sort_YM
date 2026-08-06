@@ -15,6 +15,8 @@ class Config:
     request_timeout: float
     batch_size: int
     small_group_min: int
+    digest_top_artists: int
+    digest_top_albums: int
     token_file: Path
     cache_dir: Path
     out_dir: Path
@@ -32,6 +34,8 @@ def load_config(path: Path | None = None) -> Config:
         request_timeout=data["throttle"]["request_timeout"],
         batch_size=data["fetch"]["batch_size"],
         small_group_min=data["classify"]["small_group_min"],
+        digest_top_artists=data["digest"]["top_artists"],
+        digest_top_albums=data["digest"]["top_albums"],
         token_file=ROOT / data["paths"]["token_file"],
         cache_dir=ROOT / data["paths"]["cache_dir"],
         out_dir=ROOT / data["paths"]["out_dir"],
