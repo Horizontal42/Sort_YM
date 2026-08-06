@@ -110,6 +110,16 @@ def test_parse_playlist_url_accepts_uuid_form():
     assert ref.kind is None
 
 
+def test_parse_playlist_url_accepts_lk_prefixed_uuid_form():
+    # "lk." (личный кабинет) - реальный префикс у ссылок на персональные плейлисты вроде "Мне
+    # нравится" (подтверждено вживую через client.playlist()); префикс - часть самого uuid для
+    # API, а не что-то, что нужно отрезать при парсинге.
+    ref = source.parse_playlist_url(
+        "https://music.yandex.ru/playlists/lk.dff9b654-af53-4c65-ab4a-d4ed5a0ae72d?utm_source=desktop"
+    )
+    assert ref.uuid == "lk.dff9b654-af53-4c65-ab4a-d4ed5a0ae72d"
+
+
 REJECTED_URLS = [
     "",
     "   ",

@@ -19,7 +19,10 @@ from . import fetch
 from .ymclient import chunked, with_retries
 
 HOST_RE = re.compile(r"^(?:www\.)?music\.yandex\.[a-z]{2,3}$", re.IGNORECASE)
-UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+# "lk." (личный кабинет) - префикс у ссылок на персональные плейлисты (например, "Мне нравится"),
+# в отличие от чистого uuid у редакционных плейлистов - подтверждено вживую через client.playlist():
+# без префикса API отвечает NotFoundError, префикс - часть самого uuid, а не что-то, что надо отрезать.
+UUID_RE = re.compile(r"^(?:lk\.)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 _LINK_HINT = (
     "Ожидается ссылка вида https://music.yandex.ru/users/<логин>/playlists/<номер> - "
