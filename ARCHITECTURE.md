@@ -13,17 +13,23 @@ sort_ym/
                   cache/token paths)
   auth.py       — OAuth device-flow, token storage in .token
   ymclient.py   — Client construction, batching lists, retrying network errors
-  fetch.py      — likes -> full Track -> cache/tracks.json; track artists ->
-                  client.artists() -> cache/artist_genres.json (both fetched incrementally)
+  fetch.py      — likes -> full Track -> cache/tracks.json (serialize_track); track artists ->
+                  client.artists() -> cache/artist_genres.json (both fetched incrementally);
+                  unique_artist_ids — unique artist ids from the track cache
+  source.py     — ephemeral source: parses a link to an arbitrary playlist + loads its tracks/
+                  artists into memory, never touches disk (see "--source" below)
   genres.py     — the real Yandex genre tree; classify_track — resolves track genre and artist
                   genres into a single sub-genre (root_id); ROOT_BUCKET — sub-genre -> 11 top-level buckets
   language.py   — hybrid language detection (lyrics API / genre hint / alphabet)
-  classify.py   — (sub-genre | top-level bucket, language) -> playlist name
+  classify.py   — (sub-genre | top-level bucket, language) -> playlist name; with_label — source
+                  label suffix for apply --source --label
   report.py     — two-pass report row building, writes out/report.csv, summaries
   apply.py      — playlist creation + idempotent track insertion
   digest.py     — aggregated library summary (top artists, genres, decades, top albums)
-                  -> out/digest.md, fully offline
-  cli.py        — auth / fetch / report / apply / dedupe / digest commands
+                  -> out/digest.md, fully offline without --source; Wording/playlist_wording —
+                  digest text for likes vs an arbitrary playlist
+  cli.py        — auth / fetch / report / apply / dedupe / digest commands; --source/--label
+                  on report/apply/digest (see "Key decisions")
 
 tests/
   test_genres.py — classify_track, dominant, bucket_for, genre tree
@@ -31,6 +37,9 @@ tests/
   test_report.py — two-pass collapsing of small sub-genre groups
   test_fetch.py, test_apply.py — track/artist cache, apply idempotency
   test_digest.py — artist/album aggregation, long-tail collapsing, digest size bounds
+  test_source.py — playlist URL parsing, matching client.tracks() response by id, handling
+                  private/inaccessible playlists
+  test_cli.py    — --source/--label flag validation before any network access
 
 cache/  — API cache (in .gitignore)
 out/    — reports (in .gitignore)
@@ -50,6 +59,14 @@ report → genres.load_or_fetch_catalog() → cache/genre_catalog.json
 apply --yes → users_playlists_create / users_playlists_insert_track
 digest → genres.load_catalog() + language.load_lang_cache() (cache only, no network)
        → build_rows() → out/digest.md
+
+report/apply/digest --source <url> → source.parse_playlist_url() → (user_id, kind)
+       → client.users_playlists(kind, user_id=...) → TrackShort[] → client.tracks(batch)
+       → an in-memory dict (fetch.serialize_track shape, never written to disk)
+       → client.artists(batch) → genres.load_or_fetch_catalog() (shared cache/genre_catalog.json)
+       + language.load_lang_cache() (read-only) → build_rows()
+       → out/report_source.csv | out/digest_source.md | apply → playlists on your own account
+         (shared "Genre — RU/INT" or "... (label)" with --label)
 ```
 
 ## Key decisions
@@ -109,7 +126,7 @@ digest → genres.load_catalog() + language.load_lang_cache() (cache only, no ne
   (genre sections are bounded by the size of `ROOT_BUCKET`/`BUCKET_LABELS`; top artists and top
   albums are bounded by the `[digest]` config, not the library size; anything past the top is
   collapsed into a single sentence with aggregate numbers). Artists are counted **by name**, not via
-  `zip(artists, artist_ids)` — `fetch._serialize` puts every named artist into `artists` but only
+  `zip(artists, artist_ids)` — `fetch.serialize_track` puts every named artist into `artists` but only
   those that also have an id into `artist_ids`, so the two lists can differ in length for a given
   track. For the same reason, an artist's own genre tags (`artist_tags`) are only looked up from
   tracks where the two lists' lengths match — otherwise an artist could end up with someone else's
@@ -122,6 +139,31 @@ digest → genres.load_catalog() + language.load_lang_cache() (cache only, no ne
   `artist_ids`: the migration checks whether the `year` key is **present**, not whether its value is
   truthy, otherwise tracks with a legitimately unknown year would be re-fetched on every `fetch` run.
   The command is fully offline — it never constructs a `Client`, unlike `report`/`apply`.
+
+- **Arbitrary playlist by link (`source.py`, `--source` on `report`/`apply`/`digest`)**: an
+  external source is **ephemeral** — its data is fetched into memory on every run and never
+  written to disk (`source.py` imports no `json` and never touches `cache_dir` at all). The one
+  exception is the shared `cache/genre_catalog.json` (Yandex's genre tree — a reference dataset,
+  not a specific playlist's history), reused as usual via `genres.load_or_fetch_catalog`. Writes
+  always target your own account: a foreign `user_id` is only ever passed into
+  `client.users_playlists(kind, user_id=...)` (a read); no call in `apply.py`
+  (`users_playlists_create`, `users_playlists_insert_track`) accepts one. The `yandex_music`
+  library has no URL parser at all — `source.parse_playlist_url` parses
+  `https://music.yandex.ru/users/<login>/playlists/<kind>` (plus a best-effort `/playlists/<uuid>`
+  form via `client.playlist(uuid)`) itself, with no external dependency. `Playlist.tracks` is a
+  list of `TrackShort` (no genre/album data); full `Track` objects are fetched with the same batch
+  method used for likes, `client.tracks(...)`, but the response is matched back to the requested
+  id by value (`by_id.get(...)`), not a positional `zip` — a foreign playlist is noticeably more
+  likely to contain unavailable tracks, and a shortened response under `zip` would silently mix up
+  track data (`Playlist.fetch_tracks()` is a trap — it just re-calls `users_playlists` and returns
+  the same short objects, so it isn't used). `UnauthorizedError` extends `YandexMusicError`
+  directly, not `NetworkError`, so `ymclient.with_retries` never catches or retries it — it used to
+  be unhandled anywhere in the project; it's now caught in `source._load_playlist` (a private or
+  inaccessible playlist) and by a top-level net in `cli.main()` (an expired token on any command).
+  Language for an external source is not refined via `track_supplement` (one uncached network
+  request per track on every run) — it falls back to the existing `cache/lyrics_lang.json` (read
+  only) plus the heuristics; a track whose language disagrees with what the precise check would
+  have picked can land in the wrong language playlist under `apply --source` without `--label`.
 
 ## Storage
 
@@ -137,3 +179,5 @@ digest → genres.load_catalog() + language.load_lang_cache() (cache only, no ne
   `fine_bucket` column — the sub-genre before any collapsing into a top-level bucket).
 - `out/digest.md` — a compact library summary for pasting into an LLM chat (top artists, top
   albums, genre/language/decade breakdowns).
+- `out/report_source.csv`, `out/digest_source.md` — the same reports for a `--source` run; a
+  single overwritten "last external source" slot, no history of other playlists is kept.

@@ -2,16 +2,55 @@ from __future__ import annotations
 
 import statistics
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import classify, genres, report
 
 DIGEST_FILE = "digest.md"
+DIGEST_SOURCE_FILE = "digest_source.md"
 
 DECADE_UNKNOWN = "unknown"
 DECADE_MIN_YEAR = 1900
 DECADE_MAX_YEAR = 2100
 DECADE_TOP_GENRES = 3  # константа вёрстки (сколько жанров показывать на десятилетие), не config-knob
+
+
+@dataclass(frozen=True)
+class Wording:
+    """Тексты дайджеста, зависящие от источника (лайки vs произвольный плейлист по --source).
+
+    Дефолты - буквально сегодняшние строки для лайков, чтобы render_digest(...) без явного
+    wording давал побайтово тот же результат, что и раньше.
+    """
+
+    heading: str = "Дайджест музыкальной библиотеки"
+    subtitle: str | None = None
+    tracks_label: str = "Лайкнутых треков"
+    no_years_note: str = (
+        "> Годы релиза и названия альбомов ещё не загружены - запустите `python -m sort_ym "
+        "fetch` (кэш треков обновится один раз). Секции «Десятилетия» и «Топ альбомов» "
+        "пока неинформативны."
+    )
+    album_counter_note: str = "Счётчик — сколько треков с альбома лайкнуто."
+    rest_albums_note: str = "Ещё {n} альбомов с {lo}-{hi} лайкнутыми треками."
+    deep_albums_note: str = "Треков с альбомов, где лайкнуто 2 и более: {deep} из {total} ({pct}%)."
+
+
+DEFAULT_WORDING = Wording()
+
+
+def playlist_wording(title: str, owner: str, url: str) -> Wording:
+    """Wording для дайджеста произвольного плейлиста (cmd_digest --source)."""
+    return Wording(
+        heading=f"Дайджест плейлиста «{title}»",
+        subtitle=f"Источник: плейлист «{title}» (владелец: {owner}), ссылка: {url}",
+        tracks_label="Треков в плейлисте",
+        no_years_note="> Год выхода и название альбома неизвестны для всех треков этого плейлиста.",
+        album_counter_note="Счётчик — сколько треков плейлиста относится к альбому.",
+        rest_albums_note="Ещё {n} альбомов с {lo}-{hi} треками в плейлисте.",
+        deep_albums_note="Треков с альбомов, где в плейлисте 2 и более трека: {deep} из {total} ({pct}%).",
+    )
 
 
 def _by_track_key(tracks_cache: dict[str, dict]) -> dict[tuple, dict]:
@@ -31,7 +70,7 @@ def _most_common_deterministic(counter: Counter):
 def _artist_ids_by_name(tracks_cache: dict[str, dict]) -> dict[str, list[str]]:
     """Имя артиста -> id (в порядке первого появления, без дублей).
 
-    fetch._serialize кладёт в artists всех артистов с именем, а в artist_ids - только тех, у кого
+    fetch.serialize_track кладёт в artists всех артистов с именем, а в artist_ids - только тех, у кого
     есть и имя, и id, поэтому списки могут расходиться по длине для одного трека. Берём только
     треки, где длины совпадают - иначе zip присвоил бы имени чужой id. Имя, встречающееся только
     в рассинхронных треках, остаётся без id (и без тегов) - лучше пусто, чем неверно.
@@ -224,6 +263,7 @@ def render_digest(
     artist_genres: dict[str, dict],
     top_artists: int,
     top_albums: int,
+    wording: Wording = DEFAULT_WORDING,
 ) -> str:
     total = len(rows)
     unique_artists = {name for t in tracks_cache.values() for name in t["artists"]}
@@ -237,8 +277,12 @@ def render_digest(
 
     known_years = sorted(t["year"] for t in tracks_cache.values() if t.get("year") is not None)
 
-    lines: list[str] = ["# Дайджест музыкальной библиотеки", "", "## Итоги"]
-    lines.append(f"- Лайкнутых треков: {total}")
+    lines: list[str] = [f"# {wording.heading}", ""]
+    if wording.subtitle:
+        lines.append(wording.subtitle)
+        lines.append("")
+    lines.append("## Итоги")
+    lines.append(f"- {wording.tracks_label}: {total}")
     lines.append(f"- Уникальных исполнителей: {len(unique_artists)}")
     lines.append(
         f"- Задействовано крупных корзин: {len(genre_rows)} из {len(classify.BUCKET_LABELS)}, "
@@ -251,11 +295,7 @@ def render_digest(
             f"({_pct(len(known_years), total)}%)"
         )
     else:
-        lines.append(
-            "> Годы релиза и названия альбомов ещё не загружены - запустите `python -m sort_ym "
-            "fetch` (кэш треков обновится один раз). Секции «Десятилетия» и «Топ альбомов» "
-            "пока неинформативны."
-        )
+        lines.append(wording.no_years_note)
     lines.append("")
 
     lines.append("## Жанры (крупные корзины)")
@@ -314,7 +354,7 @@ def render_digest(
     shown_albums = albums[:top_albums]
     rest_albums = albums[top_albums:]
     lines.append(f"## Топ-{len(shown_albums)} альбомов")
-    lines.append("Счётчик — сколько треков с альбома лайкнуто.")
+    lines.append(wording.album_counter_note)
     for i, alb in enumerate(shown_albums, 1):
         year_part = f" ({alb['year']})" if alb["year"] else ""
         lines.append(f"{i}. {alb['artists']} — {alb['title']}{year_part} — {alb['tracks']}")
@@ -322,9 +362,11 @@ def render_digest(
         deep_tracks = sum(a["tracks"] for a in albums if a["tracks"] >= 2)
         lines.append("")
         lines.append(
-            f"Ещё {len(rest_albums)} альбомов с {rest_albums[-1]['tracks']}-"
-            f"{rest_albums[0]['tracks']} лайкнутыми треками. Треков с альбомов, где лайкнуто "
-            f"2 и более: {deep_tracks} из {total} ({_pct(deep_tracks, total)}%)."
+            wording.rest_albums_note.format(
+                n=len(rest_albums), lo=rest_albums[-1]["tracks"], hi=rest_albums[0]["tracks"]
+            )
+            + " "
+            + wording.deep_albums_note.format(deep=deep_tracks, total=total, pct=_pct(deep_tracks, total))
         )
     lines.append("")
 
@@ -337,8 +379,8 @@ def render_digest(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def write_digest(text: str, out_dir: Path) -> Path:
+def write_digest(text: str, out_dir: Path, filename: str = DIGEST_FILE) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / DIGEST_FILE
+    out_file = out_dir / filename
     out_file.write_text(text, encoding="utf-8")
     return out_file

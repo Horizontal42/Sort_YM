@@ -1,6 +1,7 @@
 from yandex_music.exceptions import BadRequestError, TimedOutError
 
 from sort_ym import apply as apply_mod
+from sort_ym import classify
 
 
 class FakePlaylist:
@@ -208,6 +209,22 @@ def test_dedupe_playlists_dry_run_does_not_delete():
     apply_mod.dedupe_playlists(client, delay=0, dry_run=True)
 
     assert len(client.playlists[100].tracks) == 3, "дубли не должны удаляться в dry-run режиме"
+
+
+def test_with_label_appends_suffix():
+    assert classify.with_label("Рок — RU", "Друг") == "Рок — RU (Друг)"
+
+
+def test_apply_classification_uses_labeled_playlist_without_touching_shared_one():
+    # --label в cli.py переписывает target_playlist до вызова apply_classification -
+    # сама функция про метки ничего не знает, просто группирует по строке target_playlist.
+    client = FakeClient()
+    rows = [{"target_playlist": classify.with_label("Рок — RU", "Друг"), "id": 5, "album_id": 50}]
+
+    apply_mod.apply_classification(client, rows, delay=0)
+
+    assert client.created == ["Рок — RU (Друг)"]
+    assert client.inserted == [(200, 5, 50, 1)]
 
 
 def test_dedupe_playlists_removes_duplicate_block():

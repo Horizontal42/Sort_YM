@@ -47,6 +47,24 @@ def test_small_fine_group_collapses_to_coarse_bucket():
     assert all(r["fine_bucket"] == "indie" for r in indie_rows), "fine_bucket сохраняет исходную классификацию"
 
 
+def test_write_report_uses_default_filename(tmp_path):
+    rows = [{"title": "T", "artists": "A", "genre_raw": "punk", "fine_bucket": "punk", "bucket": "punk", "lang": "RU", "target_playlist": "Панк — RU", "id": 1, "album_id": 10}]
+
+    out_file = report.write_report(rows, tmp_path)
+
+    assert out_file.name == "report.csv" == report.REPORT_FILE
+    assert out_file.exists()
+
+
+def test_write_report_accepts_custom_filename_for_source_runs(tmp_path):
+    rows = [{"title": "T", "artists": "A", "genre_raw": "punk", "fine_bucket": "punk", "bucket": "punk", "lang": "RU", "target_playlist": "Панк — RU", "id": 1, "album_id": 10}]
+
+    out_file = report.write_report(rows, tmp_path, report.REPORT_SOURCE_FILE)
+
+    assert out_file.name == "report_source.csv" == report.REPORT_SOURCE_FILE
+    assert out_file.exists()
+
+
 def test_collapse_is_single_pass_and_terminates():
     # Группа ровно на границе порога (== small_group_min) НЕ схлопывается (строгое <).
     tracks_cache = {

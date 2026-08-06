@@ -7,6 +7,9 @@ from . import classify, genres, language
 
 FIELDNAMES = ["title", "artists", "genre_raw", "fine_bucket", "bucket", "lang", "target_playlist", "id", "album_id"]
 
+REPORT_FILE = "report.csv"
+REPORT_SOURCE_FILE = "report_source.csv"
+
 
 def build_rows(
     tracks_cache: dict[str, dict],
@@ -59,9 +62,9 @@ def build_rows(
     return rows
 
 
-def write_report(rows: list[dict], out_dir: Path) -> Path:
+def write_report(rows: list[dict], out_dir: Path, filename: str = REPORT_FILE) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = out_dir / "report.csv"
+    out_file = out_dir / filename
     with out_file.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         writer.writeheader()

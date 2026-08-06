@@ -40,6 +40,9 @@ For development (tests):
 .venv\Scripts\python -m sort_ym apply --limit 20 --yes  # dry run: create playlists and add the first 20 tracks
 .venv\Scripts\python -m sort_ym apply --yes             # create playlists and add all tracks (changes the account)
 .venv\Scripts\python -m sort_ym digest                  # library summary (top artists, genres) to out/digest.md - to paste into an LLM chat; no network used
+.venv\Scripts\python -m sort_ym report --source <url>             # same, but for someone else's/another playlist by link
+.venv\Scripts\python -m sort_ym digest --source <url>             # digest of that playlist
+.venv\Scripts\python -m sort_ym apply --source <url> --label Friend --yes  # sort its tracks into your own "Genre — RU (Friend)" playlists
 ```
 
 On repeated runs `fetch` only downloads new tracks, and `apply` does not duplicate tracks already added.
@@ -113,8 +116,10 @@ hard size ceilings: at most 11 lines for top-level genres, ~34 for sub-genres, 3
 Anything past the top collapses into a single sentence with aggregate numbers. The resulting file
 stays a couple hundred lines at most, regardless of whether the library has 500 tracks or 10000.
 
-The command is fully offline: it makes no network calls and needs no `.token`, only the already
-downloaded `cache/`. `report` must have run at least once first (for `cache/genre_catalog.json`).
+Without `--source` the command is fully offline: no network calls, no `.token` needed, only the
+already downloaded `cache/` (requires `report` to have run at least once, for
+`cache/genre_catalog.json`). With `--source` (see "Analyzing another playlist" below) it needs
+both network and a token, but does not require `fetch` to have run at all.
 
 ```
 $ python -m sort_ym digest
@@ -155,6 +160,40 @@ Example `out/digest.md` (abridged):
 sections will show "Unknown" until the next `python -m sort_ym fetch` run (it re-downloads the
 whole cache once, then goes back to only fetching new tracks as usual).
 
+## Analyzing another playlist
+
+`report`, `digest`, and `apply` can work on any Yandex Music playlist — your own other playlist,
+or someone else's public one — not just your likes, via the `--source` flag with a link.
+
+Getting the link: open the playlist in the web player and copy the address bar — it looks like
+`https://music.yandex.ru/users/<login>/playlists/<number>`.
+
+```
+python -m sort_ym report --source https://music.yandex.ru/users/vasya/playlists/1001
+python -m sort_ym digest --source https://music.yandex.ru/users/vasya/playlists/1001
+python -m sort_ym apply --source https://music.yandex.ru/users/vasya/playlists/1001 --label Vasya --yes
+```
+
+- **`--label <name>`** (`apply` only) — tracks land in separate playlists like "Rock — RU
+  (Vasya)" instead of the shared "Rock — RU". Without `--label` they go into the same playlists as
+  your own liked tracks of that genre/language — a deliberate default, but exactly why you should
+  decide explicitly whether you want someone else's taste mixed into your own for a foreign source.
+- **No caching, no history**: an external playlist's data is fetched fresh on every run and never
+  saved to disk (unlike likes in `cache/tracks.json`) — by design. Re-running against the same
+  link re-downloads everything from scratch.
+- **Private playlists**: if the playlist is inaccessible (private, or your token expired), the
+  command prints a clear error — either ask the owner to make it public, or re-authenticate
+  (`python -m sort_ym auth`).
+- **Slightly lower language accuracy**: an external source's language isn't refined through the
+  lyrics API (a per-track request, and without caching it would be slow on every run) — only the
+  existing `cache/lyrics_lang.json` plus the heuristics. Without `--label` a track can land in the
+  wrong language playlist, and if you later like it, it ends up in both.
+- There's no dry-run for `apply --source` (only `--limit`) — run `report --source` first to see
+  the playlist breakdown before inserting anything for real.
+- `report --source`/`digest --source` write to separate files —
+  `out/report_source.csv`/`out/digest_source.md` — and never overwrite your main
+  `out/report.csv`/`out/digest.md`.
+
 ## Handy things
 
 - Run `apply` first with `--limit 20 --yes` and check the result in the app before running it
@@ -182,6 +221,7 @@ Python 3.11+, `yandex-music==3.0.0`, standard library (`tomllib`, `csv`, `unicod
 .venv\Scripts\python -m sort_ym report
 .venv\Scripts\python -m sort_ym apply --limit 20 --yes
 .venv\Scripts\python -m sort_ym digest
+.venv\Scripts\python -m sort_ym report --source https://music.yandex.ru/users/vasya/playlists/1001
 ```
 
 Code structure and data flow are in [ARCHITECTURE.md](ARCHITECTURE.md).

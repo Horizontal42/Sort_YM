@@ -19,7 +19,7 @@ def _track_genre(track: Track) -> str | None:
     return None
 
 
-def _serialize(track: Track) -> dict:
+def serialize_track(track: Track) -> dict:
     # album_id, album_title и year берутся из одного и того же albums[0] - иначе название
     # альбома может разъехаться с его id (у трека может быть несколько альбомов).
     album = track.albums[0] if track.albums else None
@@ -89,7 +89,7 @@ def fetch_liked_tracks(
         # альбомах, "основной" альбом в ответе может отличаться от того, под которым трек лайкнут.
         # Иначе такой трек тут же попадает под stale-очистку ниже как "больше не лайкнутый".
         for original_id, track in zip(batch, tracks):
-            cache[original_id] = _serialize(track)
+            cache[original_id] = serialize_track(track)
         _atomic_write_json(cache_file, cache)
         print(f"  загружено {len(cache)}/{len(all_ids)}")
         time.sleep(batch_delay)
@@ -111,6 +111,15 @@ def load_artist_genres(cache_dir: Path) -> dict[str, dict]:
     return {}
 
 
+def unique_artist_ids(tracks: dict[str, dict]) -> list[str]:
+    """Уникальные id артистов, встречающихся в треках, отсортированные.
+
+    aid может быть None - у части треков сторонней/пиратской загрузки артист в API Яндекса
+    не привязан к id (есть только имя). Такие пропускаем, их жанр возьмём только по треку.
+    """
+    return sorted({str(aid) for t in tracks.values() for aid in t.get("artist_ids", []) if aid is not None})
+
+
 def fetch_artist_genres(
     client: Client,
     cache_dir: Path,
@@ -127,15 +136,8 @@ def fetch_artist_genres(
     cache = load_artist_genres(cache_dir)
 
     tracks_cache = load_tracks_cache(cache_dir)
-    # aid может быть None - у части треков сторонней/пиратской загрузки артист в API Яндекса
-    # не привязан к id (есть только имя). Такие пропускаем, их жанр возьмём только по треку.
-    all_artist_ids = {
-        str(aid)
-        for t in tracks_cache.values()
-        for aid in t.get("artist_ids", [])
-        if aid is not None
-    }
-    missing_ids = sorted(aid for aid in all_artist_ids if aid not in cache)
+    all_artist_ids = unique_artist_ids(tracks_cache)
+    missing_ids = [aid for aid in all_artist_ids if aid not in cache]
 
     if not missing_ids:
         return cache

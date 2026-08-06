@@ -13,17 +13,23 @@ sort_ym/
                   пути к кэшу/токену)
   auth.py       — OAuth device-flow, хранение токена в .token
   ymclient.py   — создание Client, батч-нарезка списков, ретраи сетевых ошибок
-  fetch.py      — лайки -> полные Track -> cache/tracks.json; артисты треков ->
-                  client.artists() -> cache/artist_genres.json (оба докачиваются инкрементально)
+  fetch.py      — лайки -> полные Track -> cache/tracks.json (serialize_track); артисты треков ->
+                  client.artists() -> cache/artist_genres.json (оба докачиваются инкрементально);
+                  unique_artist_ids — уникальные id артистов из кэша треков
+  source.py     — эфемерный источник: разбор ссылки на произвольный плейлист + загрузка его
+                  треков/артистов в память, без записи на диск (см. "--source" ниже)
   genres.py     — реальное дерево жанров Яндекса; classify_track — сведение жанра трека и жанров
                   артиста в один под-жанр (root_id); ROOT_BUCKET — под-жанр -> 11 крупных корзин
   language.py   — гибридная детекция языка (API текста / жанр-подсказка / алфавит)
-  classify.py   — (под-жанр | крупная корзина, язык) -> имя плейлиста
+  classify.py   — (под-жанр | крупная корзина, язык) -> имя плейлиста; with_label — суффикс метки
+                  источника для apply --source --label
   report.py     — двухпроходная сборка строк отчёта, запись out/report.csv, сводки
   apply.py      — создание плейлистов + идемпотентное добавление треков
   digest.py     — агрегированная сводка библиотеки (топ-исполнители, жанры, десятилетия,
-                  топ-альбомы) -> out/digest.md, полностью офлайн
-  cli.py        — команды auth / fetch / report / apply / dedupe / digest
+                  топ-альбомы) -> out/digest.md, полностью офлайн без --source; Wording/
+                  playlist_wording — тексты дайджеста для лайков vs произвольного плейлиста
+  cli.py        — команды auth / fetch / report / apply / dedupe / digest; --source/--label
+                  на report/apply/digest (см. "Ключевые решения")
 
 tests/
   test_genres.py — classify_track, dominant, bucket_for, дерево жанров
@@ -32,6 +38,9 @@ tests/
   test_fetch.py, test_apply.py — кэш треков/артистов, идемпотентность применения
   test_digest.py — агрегация по исполнителям и альбомам, схлопывание длинного хвоста,
                   границы размера дайджеста
+  test_source.py — разбор ссылки на плейлист, сопоставление ответа client.tracks() по id,
+                  обработка приватных/недоступных плейлистов
+  test_cli.py    — валидация флагов --source/--label до обращения к сети
 
 cache/  — кэш API (в .gitignore)
 out/    — отчёты (в .gitignore)
@@ -51,6 +60,14 @@ report → genres.load_or_fetch_catalog() → cache/genre_catalog.json
 apply --yes → users_playlists_create / users_playlists_insert_track
 digest → genres.load_catalog() + language.load_lang_cache() (только кэш, сеть не используется)
        → build_rows() → out/digest.md
+
+report/apply/digest --source <url> → source.parse_playlist_url() → (user_id, kind)
+       → client.users_playlists(kind, user_id=...) → TrackShort[] → client.tracks(batch)
+       → словарь в памяти (форма fetch.serialize_track, на диск не пишется)
+       → client.artists(batch) → genres.load_or_fetch_catalog() (общий cache/genre_catalog.json)
+       + language.load_lang_cache() (только чтение) → build_rows()
+       → out/report_source.csv | out/digest_source.md | apply → плейлисты своего аккаунта
+         (общие "Жанр — RU/INT" или "... (метка)" при --label)
 ```
 
 ## Ключевые решения
@@ -110,7 +127,7 @@ digest → genres.load_catalog() + language.load_lang_cache() (только кэ
   10000 (жанровые секции ограничены размером `ROOT_BUCKET`/`BUCKET_LABELS`, топ-исполнители и
   топ-альбомы — конфигом `[digest]`, а не всей библиотекой; хвост за пределами топа схлопывается в
   одну фразу с суммарными числами). Исполнители считаются **по имени**, а не через
-  `zip(artists, artist_ids)` — `fetch._serialize` кладёт в `artists` всех артистов с именем, а в
+  `zip(artists, artist_ids)` — `fetch.serialize_track` кладёт в `artists` всех артистов с именем, а в
   `artist_ids` только тех, у кого есть и имя, и id, поэтому списки могут расходиться по длине для
   одного трека. По той же причине собственные жанровые теги артиста (`artist_tags`) сопоставляются
   только по трекам, где длины списков совпадают — иначе можно присвоить артисту чужие теги.
@@ -122,6 +139,30 @@ digest → genres.load_catalog() + language.load_lang_cache() (только кэ
   механизмом, что и для `artist_ids`: проверяется **наличие** ключа `year`, а не правдивость
   значения, иначе треки с легитимно неизвестным годом перекачивались бы при каждом `fetch`.
   Команда полностью офлайн — `Client` не создаётся вообще, в отличие от `report`/`apply`.
+
+- **Произвольный плейлист по ссылке (`source.py`, флаг `--source` на `report`/`apply`/`digest`)**:
+  внешний источник **эфемерен** — данные загружаются в память при каждом запуске и никогда не
+  пишутся на диск (`source.py` не импортирует `json` и не трогает `cache_dir` вообще). Единственное
+  исключение — общий `cache/genre_catalog.json` (дерево жанров Яндекса, не история конкретного
+  плейлиста) переиспользуется как обычно через `genres.load_or_fetch_catalog`. Запись всегда идёт
+  в свой аккаунт: foreign `user_id` передаётся только в `client.users_playlists(kind, user_id=...)`
+  (чтение), ни один вызов `apply.py` (`users_playlists_create`, `users_playlists_insert_track`) его
+  не принимает. Разбора ссылки в библиотеке `yandex_music` нет вообще — `source.parse_playlist_url`
+  разбирает `https://music.yandex.ru/users/<логин>/playlists/<kind>` (плюс best-effort форма
+  `/playlists/<uuid>` через `client.playlist(uuid)`) сам, без внешних зависимостей. `Playlist.tracks`
+  — это `TrackShort` (без жанра/альбома), полные `Track` докачиваются тем же батч-методом
+  `client.tracks(...)`, что и лайки, но результат сопоставляется с запрошенным id по значению
+  (`by_id.get(...)`), а не позиционным `zip` — в чужом плейлисте заметно вероятнее недоступные
+  треки, и укороченный ответ при `zip` тихо перепутал бы данные между треками (`Playlist.fetch_tracks()`
+  — ловушка, просто повторяет `users_playlists` и возвращает те же короткие объекты, не используется).
+  `UnauthorizedError` наследуется от `YandexMusicError`, а не от `NetworkError`, поэтому
+  `ymclient.with_retries` её не перехватывает и не повторяет — раньше она была необработана нигде в
+  проекте; теперь ловится в `source._load_playlist` (приватный/недоступный плейлист) и общей сеткой
+  в `cli.main()` (истёкший токен на любой команде). Язык для внешнего источника не уточняется через
+  `track_supplement` (сетевой запрос на каждый трек без кэша при каждом прогоне) — используется
+  только уже существующий `cache/lyrics_lang.json` на чтение плюс эвристики; трек, разошедшийся по
+  языку с тем, что выбрала бы точная проверка, может попасть не в тот языковой плейлист при
+  `apply --source` без `--label`.
 
 ## Хранилище
 
@@ -137,3 +178,5 @@ digest → genres.load_catalog() + language.load_lang_cache() (только кэ
   `fine_bucket` — под-жанр до возможного схлопывания в крупную корзину).
 - `out/digest.md` — сжатая сводка библиотеки для вставки в чат с LLM (топ-исполнители, топ-альбомы,
   распределение по жанрам, языку и десятилетиям).
+- `out/report_source.csv`, `out/digest_source.md` — те же отчёты, но для запуска с `--source`;
+  один перезаписываемый слот "последнего внешнего источника", без истории по чужим плейлистам.

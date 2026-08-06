@@ -71,3 +71,8 @@ def playlist_name(bucket: str, lang: str) -> str:
     bucket_label = _ALL_LABELS.get(bucket, BUCKET_LABELS["other"])
     lang_label = LANG_LABELS.get(lang, LANG_LABELS["UNKNOWN"])
     return f"{bucket_label} — {lang_label}"
+
+
+def with_label(name: str, label: str) -> str:
+    """Добавляет метку источника к имени целевого плейлиста: "Рок — RU" -> "Рок — RU (Метка)"."""
+    return f"{name} ({label})"

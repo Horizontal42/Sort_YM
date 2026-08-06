@@ -227,6 +227,30 @@ def test_artist_tags_truncated_to_limit():
     assert digest.artist_tags("Artist X", ids_by_name, artist_genres, limit=3) == ["a", "b", "c"]
 
 
+def test_default_wording_matches_likes_output():
+    # Фиксирует путь без --source: render_digest(...) без явного wording не должен измениться
+    # при добавлении Wording/playlist_wording для --source.
+    tracks_cache = {"1:10": _track(1, "T1", ["Artist"], "punk")}
+    rows = _rows(tracks_cache)
+
+    text = digest.render_digest(rows, tracks_cache, {}, top_artists=10, top_albums=10)
+
+    assert text.startswith("# Дайджест музыкальной библиотеки")
+    assert "Лайкнутых треков: 1" in text
+
+
+def test_playlist_wording_does_not_mention_likes():
+    tracks_cache = {"1:10": _track(1, "T1", ["Artist"], "punk")}
+    rows = _rows(tracks_cache)
+    wording = digest.playlist_wording("Мой плейлист", "friend", "https://music.yandex.ru/x")
+
+    text = digest.render_digest(rows, tracks_cache, {}, top_artists=10, top_albums=10, wording=wording)
+
+    assert "Мой плейлист" in text
+    assert "friend" in text
+    assert "лайкнут" not in text.lower()
+
+
 def test_digest_line_count_stays_bounded_on_large_library():
     tracks_cache = {}
     tid = 0
