@@ -63,13 +63,13 @@ python -m venv .venv
 
 ```
 .venv\Scripts\python -m sort_ym report --order playlist            # без сортировки по плейлистам - треки в исходном порядке источника (как в лайках/--source плейлисте)
-.venv\Scripts\python -m sort_ym report --extra timestamp           # + дата добавления трека (added_at)
-.venv\Scripts\python -m sort_ym report --extra album                # + дата релиза и лайки альбома (release_date, album_likes_count)
-.venv\Scripts\python -m sort_ym report --extra artist                # + счётчики/рейтинг первого артиста трека
-.venv\Scripts\python -m sort_ym report --extra duration              # + длительность трека (duration_ms)
-.venv\Scripts\python -m sort_ym report --extra version                # + пометки версии трека/альбома (ремикс, юбилейное издание и т.п.)
-.venv\Scripts\python -m sort_ym report --extra timestamp album       # можно комбинировать несколько групп через пробел
-.venv\Scripts\python -m sort_ym report --extra all --order playlist  # все доп. колонки сразу + порядок как в источнике
+.venv\Scripts\python -m sort_ym report --timestamp                 # + дата добавления трека (added_at)
+.venv\Scripts\python -m sort_ym report --album                     # + дата релиза и лайки альбома (release_date, album_likes_count)
+.venv\Scripts\python -m sort_ym report --artist                    # + счётчики/рейтинг первого артиста трека
+.venv\Scripts\python -m sort_ym report --duration                  # + длительность трека (duration_ms)
+.venv\Scripts\python -m sort_ym report --version                   # + пометки версии трека/альбома (ремикс, юбилейное издание и т.п.)
+.venv\Scripts\python -m sort_ym report --timestamp --album         # флаги можно комбинировать
+.venv\Scripts\python -m sort_ym report --extra --order playlist    # --extra = сразу все доп. колонки + порядок как в источнике
 ```
 
 ## Полная очистка кэша

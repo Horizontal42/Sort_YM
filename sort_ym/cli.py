@@ -77,9 +77,18 @@ def _print_report_summary(rows: list[dict], out_file) -> None:
     print(f"\nОтчёт сохранён: {out_file}")
 
 
+def _report_extra_columns(args: argparse.Namespace) -> list[str] | None:
+    # --extra - сразу все группы; отдельные --timestamp/--duration/... - точечный выбор,
+    # можно сочетать друг с другом (--timestamp --album), --extra их всех перекрывает.
+    if args.extra:
+        return report.resolve_extra_columns(["all"])
+    selected = [name for name in report.EXTRA_GROUPS if getattr(args, name)]
+    return report.resolve_extra_columns(selected) if selected else None
+
+
 def cmd_report(args: argparse.Namespace) -> None:
     cfg = load_config()
-    extra_columns = report.resolve_extra_columns(args.extra) if args.extra else None
+    extra_columns = _report_extra_columns(args)
 
     if args.source:
         ctx = _source_context(cfg, args.source)
@@ -208,11 +217,14 @@ def main(argv: list[str] | None = None) -> None:
         "playlist - как треки идут в источнике (в лайках или в --source плейлисте), без сортировки",
     )
     p_report.add_argument(
-        "--extra", nargs="+", metavar="GROUP", choices=[*report.EXTRA_GROUPS, "all"], default=None,
-        help="добавить в CSV колонки указанных групп (можно несколько через пробел), или 'all' - сразу все: "
-        "timestamp (added_at), duration (duration_ms), version (track_version/album_version), "
-        "album (release_date/album_likes_count), artist (счётчики и рейтинг первого артиста трека)",
+        "--extra", action="store_true",
+        help="добавить в CSV все доп. колонки сразу (то же самое, что все флаги ниже вместе)",
     )
+    p_report.add_argument("--timestamp", action="store_true", help="+ дата добавления трека (added_at)")
+    p_report.add_argument("--duration", action="store_true", help="+ длительность трека (duration_ms)")
+    p_report.add_argument("--version", action="store_true", help="+ пометка версии трека/альбома (ремикс, юбилейное издание и т.п.)")
+    p_report.add_argument("--album", action="store_true", help="+ дата релиза и лайки альбома (release_date, album_likes_count)")
+    p_report.add_argument("--artist", action="store_true", help="+ счётчики и рейтинг первого артиста трека")
 
     p_apply = sub.add_parser("apply", help="создать плейлисты и добавить треки")
     p_apply.add_argument("--yes", action="store_true", help="подтвердить внесение изменений в аккаунт")

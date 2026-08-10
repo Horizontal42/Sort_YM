@@ -62,14 +62,14 @@ By default `report` groups/sorts tracks by target playlist with a base set of co
 These flags change that — from most to least commonly useful:
 
 ```
-.venv\Scripts\python -m sort_ym report --order playlist              # skip playlist-based sorting - keep source track order (as in likes/the --source playlist)
-.venv\Scripts\python -m sort_ym report --extra timestamp             # + when the track was added (added_at)
-.venv\Scripts\python -m sort_ym report --extra album                  # + album release date and likes (release_date, album_likes_count)
-.venv\Scripts\python -m sort_ym report --extra artist                  # + first artist's track counts/rating
-.venv\Scripts\python -m sort_ym report --extra duration                # + track length (duration_ms)
-.venv\Scripts\python -m sort_ym report --extra version                  # + track/album version tags (remix, anniversary edition, etc.)
-.venv\Scripts\python -m sort_ym report --extra timestamp album         # groups can be combined, space-separated
-.venv\Scripts\python -m sort_ym report --extra all --order playlist    # every extra column + source track order
+.venv\Scripts\python -m sort_ym report --order playlist            # skip playlist-based sorting - keep source track order (as in likes/the --source playlist)
+.venv\Scripts\python -m sort_ym report --timestamp                 # + when the track was added (added_at)
+.venv\Scripts\python -m sort_ym report --album                     # + album release date and likes (release_date, album_likes_count)
+.venv\Scripts\python -m sort_ym report --artist                    # + first artist's track counts/rating
+.venv\Scripts\python -m sort_ym report --duration                  # + track length (duration_ms)
+.venv\Scripts\python -m sort_ym report --version                   # + track/album version tags (remix, anniversary edition, etc.)
+.venv\Scripts\python -m sort_ym report --timestamp --album         # flags can be combined
+.venv\Scripts\python -m sort_ym report --extra --order playlist    # --extra = every extra column at once + source track order
 ```
 
 ## Full cache cleanup

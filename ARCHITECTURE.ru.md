@@ -179,10 +179,10 @@ report/apply/digest --source <url> → source.parse_playlist_url() → (user_id,
 - `cache/lyrics_lang.json` — язык текста песни по треку (id -> language code | null).
 - `out/report.csv` — предпросмотр распределения по плейлистам перед `apply` (включая колонку
   `fine_bucket` — под-жанр до возможного схлопывания в крупную корзину). `report --order playlist`
-  сохраняет исходный порядок треков вместо сортировки по целевому плейлисту; `report --extra
-  <группа...>` добавляет колонки выбранных групп (`timestamp`/`duration`/`version`/`album`/`artist`,
-  или `all` - сразу все; `report.EXTRA_GROUPS` -> список колонок, `report.resolve_extra_columns()`
-  разворачивает имена групп в список колонок для CLI).
+  сохраняет исходный порядок треков вместо сортировки по целевому плейлисту; отдельные флаги
+  `--timestamp`/`--duration`/`--version`/`--album`/`--artist` (можно сочетать) добавляют колонки
+  своей группы, `--extra` — сразу все группы. Соответствие флаг -> колонки CSV - `report.EXTRA_GROUPS`;
+  `report.resolve_extra_columns()` разворачивает выбранные группы в список колонок для CLI.
 - `out/digest.md` — сжатая сводка библиотеки для вставки в чат с LLM (топ-исполнители, топ-альбомы,
   распределение по жанрам, языку и десятилетиям).
 - `out/report_source.csv`, `out/digest_source.md` — те же отчёты, но для запуска с `--source`;
