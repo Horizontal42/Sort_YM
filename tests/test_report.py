@@ -1,3 +1,5 @@
+import pytest
+
 from sort_ym import report
 
 CATALOG: dict = {}  # classify_track с пустыми artist_genre_lists использует только genre_raw
@@ -105,7 +107,20 @@ def test_order_grouped_sorts_by_target_playlist():
     assert rows == sorted(rows, key=lambda r: (r["target_playlist"], r["artists"], r["title"]))
 
 
-def test_extra_fields_adds_columns_from_track_and_artist_cache():
+def test_resolve_extra_columns_expands_single_group():
+    assert report.resolve_extra_columns(["timestamp"]) == ["added_at"]
+
+
+def test_resolve_extra_columns_all_expands_every_group_in_canonical_order():
+    assert report.resolve_extra_columns(["all"]) == report.EXTRA_FIELDNAMES
+
+
+def test_resolve_extra_columns_rejects_unknown_group():
+    with pytest.raises(ValueError, match="bogus"):
+        report.resolve_extra_columns(["bogus"])
+
+
+def test_extra_columns_only_adds_requested_group():
     tracks_cache = {
         "1:1": {
             **_track(1, "T", ["A"], "punk", artist_ids=[42]),
@@ -125,7 +140,35 @@ def test_extra_fields_adds_columns_from_track_and_artist_cache():
         genre_catalog=CATALOG,
         artist_genres=artist_genres,
         small_group_min=12,
-        extra_fields=True,
+        extra_columns=report.resolve_extra_columns(["timestamp"]),
+    )
+
+    row = rows[0]
+    assert row["added_at"] == "2026-01-01T00:00:00+00:00"
+    assert "duration_ms" not in row, "запрошена только группа timestamp - duration не должно быть в строке"
+
+
+def test_extra_columns_all_adds_every_group():
+    tracks_cache = {
+        "1:1": {
+            **_track(1, "T", ["A"], "punk", artist_ids=[42]),
+            "added_at": "2026-01-01T00:00:00+00:00",
+            "duration_ms": 123000,
+            "track_version": "Remix",
+            "album_version": None,
+            "release_date": "2020-05-01T00:00:00+03:00",
+            "album_likes_count": 10,
+        },
+    }
+    artist_genres = {"42": {"name": "A", "genres": [], "counts": {"tracks": 5}, "ratings": {"month": 7}}}
+
+    rows = report.build_rows(
+        tracks_cache=tracks_cache,
+        lang_cache={},
+        genre_catalog=CATALOG,
+        artist_genres=artist_genres,
+        small_group_min=12,
+        extra_columns=report.resolve_extra_columns(["all"]),
     )
 
     row = rows[0]
@@ -137,14 +180,14 @@ def test_extra_fields_adds_columns_from_track_and_artist_cache():
     assert row["artist_rating_month"] == 7
 
 
-def test_write_report_extra_fields_writes_extended_header(tmp_path):
-    rows = [{"title": "T", "artists": "A", "genre_raw": "punk", "fine_bucket": "punk", "bucket": "punk", "lang": "RU", "target_playlist": "Панк — RU", "id": 1, "album_id": 10, "added_at": "x", "duration_ms": 1, "track_version": "", "album_version": "", "release_date": "y", "album_likes_count": 1, "artist_track_count": 1, "artist_direct_albums": 1, "artist_also_albums": 1, "artist_also_tracks": 1, "artist_rating_month": 1, "artist_rating_week": 1, "artist_rating_day": 1}]
+def test_write_report_extra_columns_writes_only_selected_header(tmp_path):
+    rows = [{"title": "T", "artists": "A", "genre_raw": "punk", "fine_bucket": "punk", "bucket": "punk", "lang": "RU", "target_playlist": "Панк — RU", "id": 1, "album_id": 10, "added_at": "x"}]
 
-    out_file = report.write_report(rows, tmp_path, extra_fields=True)
+    out_file = report.write_report(rows, tmp_path, extra_columns=report.resolve_extra_columns(["timestamp"]))
 
     header = out_file.read_text(encoding="utf-8-sig").splitlines()[0]
     assert "added_at" in header
-    assert "artist_rating_day" in header
+    assert "artist_rating_day" not in header
 
 
 def test_collapse_is_single_pass_and_terminates():

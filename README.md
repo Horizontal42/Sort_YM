@@ -33,21 +33,44 @@ For development (tests):
 
 ## What it does
 
+### Core commands
+
 ```
 .venv\Scripts\python -m sort_ym auth                    # log in to a Yandex account via device-flow and save the token to .token
 .venv\Scripts\python -m sort_ym fetch                   # download liked tracks (cache/tracks.json) and their artists' genres (cache/artist_genres.json); does not change the account
 .venv\Scripts\python -m sort_ym report                  # compute genre and language per track, save out/report.csv (does not change the account)
-.venv\Scripts\python -m sort_ym report --order playlist  # skip playlist-based sorting - keep source track order (as in likes/the --source playlist)
-.venv\Scripts\python -m sort_ym report --extra           # + added_at/duration_ms/release_date/artist rating columns etc.
 .venv\Scripts\python -m sort_ym apply --limit 20 --yes  # dry run: create playlists and add the first 20 tracks
 .venv\Scripts\python -m sort_ym apply --yes             # create playlists and add all tracks (changes the account)
 .venv\Scripts\python -m sort_ym digest                  # library summary (top artists, genres) to out/digest.md - to paste into an LLM chat; no network used
-.venv\Scripts\python -m sort_ym report --source <url>             # same, but for someone else's/another playlist by link
-.venv\Scripts\python -m sort_ym digest --source <url>             # digest of that playlist
-.venv\Scripts\python -m sort_ym apply --source <url> --label Friend --yes  # sort its tracks into your own "Genre — RU (Friend)" playlists
 ```
 
 On repeated runs `fetch` only downloads new tracks, and `apply` does not duplicate tracks already added.
+
+### Extra: another playlist instead of your likes
+
+```
+.venv\Scripts\python -m sort_ym report --source <url>                    # same, but for someone else's/another playlist by link
+.venv\Scripts\python -m sort_ym digest --source <url>                    # digest of that playlist
+.venv\Scripts\python -m sort_ym apply --source <url> --label Friend --yes  # sort its tracks into your own "Genre — RU (Friend)" playlists
+```
+
+See "Analyzing and sorting another playlist" below for details.
+
+### Extra: fine-tuning report.csv
+
+By default `report` groups/sorts tracks by target playlist with a base set of columns.
+These flags change that — from most to least commonly useful:
+
+```
+.venv\Scripts\python -m sort_ym report --order playlist              # skip playlist-based sorting - keep source track order (as in likes/the --source playlist)
+.venv\Scripts\python -m sort_ym report --extra timestamp             # + when the track was added (added_at)
+.venv\Scripts\python -m sort_ym report --extra album                  # + album release date and likes (release_date, album_likes_count)
+.venv\Scripts\python -m sort_ym report --extra artist                  # + first artist's track counts/rating
+.venv\Scripts\python -m sort_ym report --extra duration                # + track length (duration_ms)
+.venv\Scripts\python -m sort_ym report --extra version                  # + track/album version tags (remix, anniversary edition, etc.)
+.venv\Scripts\python -m sort_ym report --extra timestamp album         # groups can be combined, space-separated
+.venv\Scripts\python -m sort_ym report --extra all --order playlist    # every extra column + source track order
+```
 
 ## Full cache cleanup
 

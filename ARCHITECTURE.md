@@ -181,8 +181,9 @@ report/apply/digest --source <url> → source.parse_playlist_url() → (user_id,
 - `out/report.csv` — a preview of the playlist breakdown before `apply` (including the
   `fine_bucket` column — the sub-genre before any collapsing into a top-level bucket).
   `report --order playlist` keeps source track order instead of sorting by target playlist;
-  `report --extra` adds the columns listed above (`added_at`, `duration_ms`, `release_date`,
-  `artist_rating_month/week/day`, etc. - full list in `report.EXTRA_FIELDNAMES`).
+  `report --extra <group...>` adds the selected groups' columns (`timestamp`/`duration`/
+  `version`/`album`/`artist`, or `all` for every group; `report.EXTRA_GROUPS` -> column list,
+  `report.resolve_extra_columns()` expands group names into a column list for the CLI).
 - `out/digest.md` — a compact library summary for pasting into an LLM chat (top artists, top
   albums, genre/language/decade breakdowns).
 - `out/report_source.csv`, `out/digest_source.md` — the same reports for a `--source` run; a

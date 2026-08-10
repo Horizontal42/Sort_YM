@@ -33,21 +33,44 @@ python -m venv .venv
 
 ## Что делает
 
+### Основные команды
+
 ```
 .venv\Scripts\python -m sort_ym auth                    # войти в аккаунт Яндекса через device-flow и сохранить токен в .token
 .venv\Scripts\python -m sort_ym fetch                   # скачать лайкнутые треки (cache/tracks.json) и жанры их артистов (cache/artist_genres.json); аккаунт не меняет
 .venv\Scripts\python -m sort_ym report                  # посчитать жанр и язык каждого трека, сохранить out/report.csv (аккаунт не меняет)
-.venv\Scripts\python -m sort_ym report --order playlist  # без сортировки по плейлистам - треки в исходном порядке (как в лайках/--source плейлисте)
-.venv\Scripts\python -m sort_ym report --extra           # + колонки added_at/duration_ms/release_date/рейтинг артиста и т.п.
 .venv\Scripts\python -m sort_ym apply --limit 20 --yes  # пробный запуск: создать плейлисты и добавить в них первые 20 треков
 .venv\Scripts\python -m sort_ym apply --yes             # создать плейлисты и добавить в них все треки (меняет аккаунт)
 .venv\Scripts\python -m sort_ym digest                  # сводка библиотеки (топ-исполнители, жанры) в out/digest.md - чтобы вставить в чат с LLM; сеть не используется
-.venv\Scripts\python -m sort_ym report --source <ссылка>          # то же самое, но для чужого/другого плейлиста по ссылке
-.venv\Scripts\python -m sort_ym digest --source <ссылка>          # дайджест чужого/другого плейлиста
-.venv\Scripts\python -m sort_ym apply --source <ссылка> --label Друг --yes  # раскидать его треки по своим плейлистам "Жанр — RU (Друг)"
 ```
 
 При повторных запусках `fetch` докачивает только новые треки, а `apply` не дублирует уже добавленные треки.
+
+### Дополнительно: другой плейлист вместо лайков
+
+```
+.venv\Scripts\python -m sort_ym report --source <ссылка>                    # то же самое, но для чужого/другого плейлиста по ссылке
+.venv\Scripts\python -m sort_ym digest --source <ссылка>                    # дайджест чужого/другого плейлиста
+.venv\Scripts\python -m sort_ym apply --source <ссылка> --label Друг --yes  # раскидать его треки по своим плейлистам "Жанр — RU (Друг)"
+```
+
+Подробнее — раздел «Анализ и раскидка другого плейлиста» ниже.
+
+### Дополнительно: гибкая настройка report.csv
+
+По умолчанию `report` группирует и сортирует треки по целевому плейлисту с базовым набором колонок.
+Эти флаги это меняют — от самого востребованного к более редкому:
+
+```
+.venv\Scripts\python -m sort_ym report --order playlist            # без сортировки по плейлистам - треки в исходном порядке источника (как в лайках/--source плейлисте)
+.venv\Scripts\python -m sort_ym report --extra timestamp           # + дата добавления трека (added_at)
+.venv\Scripts\python -m sort_ym report --extra album                # + дата релиза и лайки альбома (release_date, album_likes_count)
+.venv\Scripts\python -m sort_ym report --extra artist                # + счётчики/рейтинг первого артиста трека
+.venv\Scripts\python -m sort_ym report --extra duration              # + длительность трека (duration_ms)
+.venv\Scripts\python -m sort_ym report --extra version                # + пометки версии трека/альбома (ремикс, юбилейное издание и т.п.)
+.venv\Scripts\python -m sort_ym report --extra timestamp album       # можно комбинировать несколько групп через пробел
+.venv\Scripts\python -m sort_ym report --extra all --order playlist  # все доп. колонки сразу + порядок как в источнике
+```
 
 ## Полная очистка кэша
 

@@ -79,14 +79,15 @@ def _print_report_summary(rows: list[dict], out_file) -> None:
 
 def cmd_report(args: argparse.Namespace) -> None:
     cfg = load_config()
+    extra_columns = report.resolve_extra_columns(args.extra) if args.extra else None
 
     if args.source:
         ctx = _source_context(cfg, args.source)
         rows = report.build_rows(
             ctx.tracks, ctx.lang_cache, ctx.catalog, ctx.artist_genres, cfg.small_group_min,
-            order=args.order, extra_fields=args.extra,
+            order=args.order, extra_columns=extra_columns,
         )
-        out_file = report.write_report(rows, cfg.out_dir, report.REPORT_SOURCE_FILE, extra_fields=args.extra)
+        out_file = report.write_report(rows, cfg.out_dir, report.REPORT_SOURCE_FILE, extra_columns=extra_columns)
         _print_report_summary(rows, out_file)
         return
 
@@ -104,9 +105,9 @@ def cmd_report(args: argparse.Namespace) -> None:
 
     rows = report.build_rows(
         tracks_cache, lang_cache, catalog, artist_genres, cfg.small_group_min,
-        order=args.order, extra_fields=args.extra,
+        order=args.order, extra_columns=extra_columns,
     )
-    out_file = report.write_report(rows, cfg.out_dir, extra_fields=args.extra)
+    out_file = report.write_report(rows, cfg.out_dir, extra_columns=extra_columns)
     _print_report_summary(rows, out_file)
 
 
@@ -207,9 +208,10 @@ def main(argv: list[str] | None = None) -> None:
         "playlist - как треки идут в источнике (в лайках или в --source плейлисте), без сортировки",
     )
     p_report.add_argument(
-        "--extra", action="store_true",
-        help="добавить в CSV колонки с доп. данными API: дата добавления, длительность, дата релиза "
-        "альбома, рейтинг/счётчики первого артиста трека",
+        "--extra", nargs="+", metavar="GROUP", choices=[*report.EXTRA_GROUPS, "all"], default=None,
+        help="добавить в CSV колонки указанных групп (можно несколько через пробел), или 'all' - сразу все: "
+        "timestamp (added_at), duration (duration_ms), version (track_version/album_version), "
+        "album (release_date/album_likes_count), artist (счётчики и рейтинг первого артиста трека)",
     )
 
     p_apply = sub.add_parser("apply", help="создать плейлисты и добавить треки")

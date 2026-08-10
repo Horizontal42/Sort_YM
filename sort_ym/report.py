@@ -7,37 +7,52 @@ from . import classify, genres, language
 
 FIELDNAMES = ["title", "artists", "genre_raw", "fine_bucket", "bucket", "lang", "target_playlist", "id", "album_id"]
 
-# Только вместе с --extra: сырые поля API, которых нет в базовом отчёте (см. обсуждение в чате -
-# added_at из TrackShort.timestamp, остальное - из Track/Album/Artist, но не заполнено стабильно
-# у part данных вроде explicit/lyrics_info, поэтому в набор не включено).
-EXTRA_FIELDNAMES = [
-    "added_at",
-    "duration_ms",
-    "track_version",
-    "album_version",
-    "release_date",
-    "album_likes_count",
-    "artist_track_count",
-    "artist_direct_albums",
-    "artist_also_albums",
-    "artist_also_tracks",
-    "artist_rating_month",
-    "artist_rating_week",
-    "artist_rating_day",
-]
+# Сырые поля API, которых нет в базовом отчёте - подключаются группами через --extra
+# (см. обсуждение в чате: added_at из TrackShort.timestamp, остальное - из Track/Album/Artist).
+# Порядок в EXTRA_FIELDNAMES - канонический порядок колонок в CSV независимо от порядка групп в --extra.
+EXTRA_GROUPS: dict[str, list[str]] = {
+    "timestamp": ["added_at"],
+    "duration": ["duration_ms"],
+    "version": ["track_version", "album_version"],
+    "album": ["release_date", "album_likes_count"],
+    "artist": [
+        "artist_track_count",
+        "artist_direct_albums",
+        "artist_also_albums",
+        "artist_also_tracks",
+        "artist_rating_month",
+        "artist_rating_week",
+        "artist_rating_day",
+    ],
+}
+EXTRA_FIELDNAMES = [col for cols in EXTRA_GROUPS.values() for col in cols]
+
+
+def resolve_extra_columns(group_names: list[str]) -> list[str]:
+    """--extra timestamp album -> ["added_at", "release_date", "album_likes_count"] (канонический порядок).
+
+    "all" - алиас на все группы сразу.
+    """
+    names = list(EXTRA_GROUPS) if "all" in group_names else group_names
+    unknown = set(names) - set(EXTRA_GROUPS)
+    if unknown:
+        raise ValueError(f"неизвестные группы --extra: {sorted(unknown)}, доступны: {list(EXTRA_GROUPS)} или 'all'")
+    selected = {col for name in names for col in EXTRA_GROUPS[name]}
+    return [col for col in EXTRA_FIELDNAMES if col in selected]
+
 
 REPORT_FILE = "report.csv"
 REPORT_SOURCE_FILE = "report_source.csv"
 
 
-def _extra_row_fields(t: dict, artist_genres: dict[str, dict]) -> dict:
+def _extra_row_fields(t: dict, artist_genres: dict[str, dict], columns: list[str]) -> dict:
     # Счётчики/рейтинг берём у первого артиста трека - у треков с несколькими артистами
     # остальные не имеют выделенной колонки (см. обсуждение в чате).
     artist_ids = t.get("artist_ids", [])
     artist = artist_genres.get(str(artist_ids[0])) if artist_ids else None
     counts = (artist or {}).get("counts") or {}
     ratings = (artist or {}).get("ratings") or {}
-    return {
+    all_values = {
         "added_at": t.get("added_at"),
         "duration_ms": t.get("duration_ms"),
         "track_version": t.get("track_version") or "",
@@ -52,6 +67,7 @@ def _extra_row_fields(t: dict, artist_genres: dict[str, dict]) -> dict:
         "artist_rating_week": ratings.get("week"),
         "artist_rating_day": ratings.get("day"),
     }
+    return {col: all_values[col] for col in columns}
 
 
 def build_rows(
@@ -61,7 +77,7 @@ def build_rows(
     artist_genres: dict[str, dict],
     small_group_min: int,
     order: str = "grouped",
-    extra_fields: bool = False,
+    extra_columns: list[str] | None = None,
 ) -> list[dict]:
     # Проход 1: под-жанр (fine) и язык на каждый трек, размеры групп (fine, lang) фиксируем сразу.
     prelim = []
@@ -101,8 +117,8 @@ def build_rows(
             "id": t["id"],
             "album_id": t["album_id"],
         }
-        if extra_fields:
-            row.update(_extra_row_fields(t, artist_genres))
+        if extra_columns:
+            row.update(_extra_row_fields(t, artist_genres, extra_columns))
         rows.append(row)
 
     # "playlist" - порядок как в источнике (tracks_cache сохраняет порядок плейлиста, см. source.py);
@@ -114,10 +130,10 @@ def build_rows(
     return rows
 
 
-def write_report(rows: list[dict], out_dir: Path, filename: str = REPORT_FILE, extra_fields: bool = False) -> Path:
+def write_report(rows: list[dict], out_dir: Path, filename: str = REPORT_FILE, extra_columns: list[str] | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / filename
-    fieldnames = FIELDNAMES + EXTRA_FIELDNAMES if extra_fields else FIELDNAMES
+    fieldnames = FIELDNAMES + extra_columns if extra_columns else FIELDNAMES
     with out_file.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
