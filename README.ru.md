@@ -37,6 +37,8 @@ python -m venv .venv
 .venv\Scripts\python -m sort_ym auth                    # войти в аккаунт Яндекса через device-flow и сохранить токен в .token
 .venv\Scripts\python -m sort_ym fetch                   # скачать лайкнутые треки (cache/tracks.json) и жанры их артистов (cache/artist_genres.json); аккаунт не меняет
 .venv\Scripts\python -m sort_ym report                  # посчитать жанр и язык каждого трека, сохранить out/report.csv (аккаунт не меняет)
+.venv\Scripts\python -m sort_ym report --order playlist  # без сортировки по плейлистам - треки в исходном порядке (как в лайках/--source плейлисте)
+.venv\Scripts\python -m sort_ym report --extra           # + колонки added_at/duration_ms/release_date/рейтинг артиста и т.п.
 .venv\Scripts\python -m sort_ym apply --limit 20 --yes  # пробный запуск: создать плейлисты и добавить в них первые 20 треков
 .venv\Scripts\python -m sort_ym apply --yes             # создать плейлисты и добавить в них все треки (меняет аккаунт)
 .venv\Scripts\python -m sort_ym digest                  # сводка библиотеки (топ-исполнители, жанры) в out/digest.md - чтобы вставить в чат с LLM; сеть не используется
@@ -194,6 +196,8 @@ python -m sort_ym apply --source https://music.yandex.ru/users/vasya/playlists/1
 - Результаты `report --source`/`digest --source` сохраняются в отдельные файлы —
   `out/report_source.csv`/`out/digest_source.md` — и не затирают ваши основные `out/report.csv`/
   `out/digest.md`.
+- `report --source <ссылка> --order playlist` — треки в CSV пойдут в том же порядке, что и в самом
+  плейлисте, без пересортировки по целевому плейлисту.
 
 ## Handy things
 

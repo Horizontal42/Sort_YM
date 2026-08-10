@@ -5,33 +5,41 @@ from sort_ym import digest, report, source
 
 
 class FakeArtist:
-    def __init__(self, id_, name, genres=None):
+    def __init__(self, id_, name, genres=None, counts=None, ratings=None):
         self.id = id_
         self.name = name
         self.genres = genres
+        self.counts = counts
+        self.ratings = ratings
 
 
 class FakeAlbum:
-    def __init__(self, id_, genre=None, title="", year=None):
+    def __init__(self, id_, genre=None, title="", year=None, version=None, release_date=None, likes_count=None):
         self.id = id_
         self.genre = genre
         self.title = title
         self.year = year
+        self.version = version
+        self.release_date = release_date
+        self.likes_count = likes_count
 
 
 class FakeTrack:
-    def __init__(self, id_, albums, title="Title", artists=None, lyrics_available=False):
+    def __init__(self, id_, albums, title="Title", artists=None, lyrics_available=False, duration_ms=None, version=None):
         self.id = id_
         self.albums = albums
         self.title = title
         self.artists = artists or [FakeArtist(1, "Artist")]
         self.lyrics_available = lyrics_available
+        self.duration_ms = duration_ms
+        self.version = version
 
 
 class FakeTrackShort:
-    def __init__(self, id_, album_id=None):
+    def __init__(self, id_, album_id=None, timestamp=None):
         self.id = id_
         self.album_id = album_id
+        self.timestamp = timestamp
 
     @property
     def track_id(self):
@@ -243,7 +251,10 @@ def test_fetch_artist_genres_map_batches_without_touching_disk(tmp_path):
 
     result = source.fetch_artist_genres_map(client, ["7", "9"], batch_size=100, batch_delay=0)
 
-    assert result == {"7": {"name": "A", "genres": ["indie"]}, "9": {"name": "B", "genres": ["rock"]}}
+    assert result == {
+        "7": {"name": "A", "genres": ["indie"], "counts": None, "ratings": None},
+        "9": {"name": "B", "genres": ["rock"], "counts": None, "ratings": None},
+    }
     assert list(tmp_path.iterdir()) == []  # ничего не записано на диск
 
 
@@ -253,10 +264,12 @@ def test_source_track_shape_matches_fetch_cache_shape(tmp_path):
     expected_keys = {
         "id", "album_id", "album_title", "year", "title",
         "artists", "artist_ids", "genre_raw", "lyrics_available",
+        "added_at", "duration_ms", "track_version", "album_version", "release_date", "album_likes_count",
     }
 
     class FakeLikes:
         tracks_ids = ["100:10"]
+        tracks = [FakeTrackShort(100, timestamp="2026-01-01T00:00:00+00:00")]
 
     class FakeLikesClient:
         def users_likes_tracks(self):

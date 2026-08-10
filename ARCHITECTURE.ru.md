@@ -169,13 +169,19 @@ report/apply/digest --source <url> → source.parse_playlist_url() → (user_id,
 - `.token` — OAuth-токен аккаунта (не коммитится).
 - `cache/tracks.json` — метаданные лайкнутых треков, включая `artist_ids` (id артистов трека),
   `album_title` и `year` (название и год релиза альбома, `Album.title`/`Album.year`; `year` может
-  быть `null`).
-- `cache/artist_genres.json` — `{artist_id: {name, genres: [slug, ...]}}`, один и более жанров
-  на артиста.
+  быть `null`), а также `added_at` (дата добавления трека в лайки, `TrackShort.timestamp`),
+  `duration_ms`, `track_version`/`album_version`, `release_date`, `album_likes_count` - сырые поля
+  API, не используемые в классификации, но доступные в `report --extra` (см. ниже).
+- `cache/artist_genres.json` — `{artist_id: {name, genres: [slug, ...], counts, ratings}}`, один и
+  более жанров на артиста; `counts`/`ratings` - те же поля `Artist.counts`/`Artist.ratings`, что
+  и `added_at` выше, только для `report --extra`.
 - `cache/genre_catalog.json` — плоский снимок дерева жанров Яндекса (id -> title, root_id).
 - `cache/lyrics_lang.json` — язык текста песни по треку (id -> language code | null).
 - `out/report.csv` — предпросмотр распределения по плейлистам перед `apply` (включая колонку
-  `fine_bucket` — под-жанр до возможного схлопывания в крупную корзину).
+  `fine_bucket` — под-жанр до возможного схлопывания в крупную корзину). `report --order playlist`
+  сохраняет исходный порядок треков вместо сортировки по целевому плейлисту; `report --extra`
+  добавляет колонки из списка выше (`added_at`, `duration_ms`, `release_date`,
+  `artist_rating_month/week/day` и т.д. - полный список в `report.EXTRA_FIELDNAMES`).
 - `out/digest.md` — сжатая сводка библиотеки для вставки в чат с LLM (топ-исполнители, топ-альбомы,
   распределение по жанрам, языку и десятилетиям).
 - `out/report_source.csv`, `out/digest_source.md` — те же отчёты, но для запуска с `--source`;

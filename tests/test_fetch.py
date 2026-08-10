@@ -5,32 +5,49 @@ from sort_ym import fetch
 
 
 class FakeArtist:
-    def __init__(self, id_, name, genres=None):
+    def __init__(self, id_, name, genres=None, counts=None, ratings=None):
         self.id = id_
         self.name = name
         self.genres = genres
+        self.counts = counts
+        self.ratings = ratings
 
 
 class FakeAlbum:
-    def __init__(self, id_, genre=None, title="", year=None):
+    def __init__(self, id_, genre=None, title="", year=None, version=None, release_date=None, likes_count=None):
         self.id = id_
         self.genre = genre
         self.title = title
         self.year = year
+        self.version = version
+        self.release_date = release_date
+        self.likes_count = likes_count
 
 
 class FakeTrack:
-    def __init__(self, id_, albums, title="Title", artists=None, lyrics_available=False):
+    def __init__(self, id_, albums, title="Title", artists=None, lyrics_available=False, duration_ms=None, version=None):
         self.id = id_
         self.albums = albums
         self.title = title
         self.artists = artists or [FakeArtist(1, "Artist")]
         self.lyrics_available = lyrics_available
+        self.duration_ms = duration_ms
+        self.version = version
+
+
+class FakeTrackShort:
+    def __init__(self, id_, timestamp=None):
+        self.id = id_
+        self.timestamp = timestamp
 
 
 class FakeLikes:
-    def __init__(self, tracks_ids):
+    def __init__(self, tracks_ids, tracks=None):
         self.tracks_ids = tracks_ids
+        # По умолчанию строим TrackShort-заглушки из tracks_ids ("100:10" -> id=100) -
+        # реальный API всегда возвращает .tracks вместе с .tracks_ids, тесты не завязанные
+        # на timestamp могут его не указывать явно.
+        self.tracks = tracks if tracks is not None else [FakeTrackShort(tid.split(":")[0]) for tid in tracks_ids]
 
 
 class FakeClient:
@@ -182,6 +199,34 @@ def test_fetch_re_downloads_old_cache_entries_missing_year(tmp_path: Path):
     assert cache["100:10"]["album_title"] == "Iowa"
 
 
+def test_fetch_re_downloads_old_cache_entries_missing_duration_ms(tmp_path: Path):
+    # Кэш до добавления added_at/duration_ms и т.п. (но уже с artist_ids/year) должен
+    # быть докачан повторно.
+    cache_dir = tmp_path
+    cache_dir.mkdir(exist_ok=True)
+    old_entry = {
+        "id": 100,
+        "album_id": 10,
+        "album_title": "Iowa",
+        "year": 2001,
+        "title": "Old",
+        "artists": ["Artist A"],
+        "artist_ids": [7],
+        "genre_raw": "pop",
+        "lyrics_available": False,
+    }
+    (cache_dir / fetch.TRACKS_CACHE_FILE).write_text(
+        json.dumps({"100:10": old_entry}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    track = FakeTrack(id_=100, albums=[FakeAlbum(10, title="Iowa", year=2001)], artists=[FakeArtist(7, "Artist A")], duration_ms=250000)
+    client = FakeClient(likes_ids=["100:10"], tracks_by_batch={("100:10",): [track]})
+
+    cache = fetch.fetch_liked_tracks(client, cache_dir, batch_size=100, batch_delay=0)
+
+    assert cache["100:10"]["duration_ms"] == 250000
+
+
 def test_fetch_does_not_redownload_entries_with_legitimately_unknown_year(tmp_path: Path):
     # Регрессия: year=None легитимен (у альбома действительно нет года), и такая запись
     # не должна перекачиваться при каждом fetch - проверяем наличие ключа, а не значение.
@@ -197,6 +242,7 @@ def test_fetch_does_not_redownload_entries_with_legitimately_unknown_year(tmp_pa
         "artist_ids": [7],
         "genre_raw": "pop",
         "lyrics_available": False,
+        "duration_ms": 200000,
     }
     (cache_dir / fetch.TRACKS_CACHE_FILE).write_text(
         json.dumps({"100:10": entry}, ensure_ascii=False), encoding="utf-8"
@@ -231,8 +277,8 @@ def test_fetch_artist_genres_batches_and_caches(tmp_path: Path):
 
     result = fetch.fetch_artist_genres(client, cache_dir, batch_size=100, batch_delay=0)
 
-    assert result["7"] == {"name": "Artist A", "genres": ["indie"]}
-    assert result["9"] == {"name": "Artist B", "genres": ["rock", "punk"]}
+    assert result["7"] == {"name": "Artist A", "genres": ["indie"], "counts": None, "ratings": None}
+    assert result["9"] == {"name": "Artist B", "genres": ["rock", "punk"], "counts": None, "ratings": None}
 
     persisted = fetch.load_artist_genres(cache_dir)
     assert persisted == result
@@ -247,7 +293,8 @@ def test_fetch_artist_genres_skips_already_cached(tmp_path: Path):
         json.dumps(tracks_cache, ensure_ascii=False), encoding="utf-8"
     )
     (cache_dir / fetch.ARTIST_GENRES_CACHE_FILE).write_text(
-        json.dumps({"7": {"name": "Artist A", "genres": ["indie"]}}, ensure_ascii=False), encoding="utf-8"
+        json.dumps({"7": {"name": "Artist A", "genres": ["indie"], "counts": None, "ratings": None}}, ensure_ascii=False),
+        encoding="utf-8",
     )
 
     def boom(batch):
@@ -258,4 +305,28 @@ def test_fetch_artist_genres_skips_already_cached(tmp_path: Path):
 
     result = fetch.fetch_artist_genres(client, cache_dir, batch_size=100, batch_delay=0)
 
-    assert result == {"7": {"name": "Artist A", "genres": ["indie"]}}
+    assert result == {"7": {"name": "Artist A", "genres": ["indie"], "counts": None, "ratings": None}}
+
+
+def test_fetch_artist_genres_re_downloads_old_cache_entries_missing_counts(tmp_path: Path):
+    # Кэш до добавления counts/ratings (но уже с name/genres) должен быть докачан повторно.
+    cache_dir = tmp_path
+    tracks_cache = {
+        "100:10": {"id": 100, "album_id": 10, "title": "T1", "artists": ["A"], "artist_ids": [7], "genre_raw": "pop", "lyrics_available": False},
+    }
+    (cache_dir / fetch.TRACKS_CACHE_FILE).write_text(
+        json.dumps(tracks_cache, ensure_ascii=False), encoding="utf-8"
+    )
+    (cache_dir / fetch.ARTIST_GENRES_CACHE_FILE).write_text(
+        json.dumps({"7": {"name": "Artist A", "genres": ["indie"]}}, ensure_ascii=False), encoding="utf-8"
+    )
+
+    client = FakeClient(
+        likes_ids=[],
+        tracks_by_batch={},
+        artists_by_batch={("7",): [FakeArtist(7, "Artist A", genres=["indie"])]},
+    )
+
+    result = fetch.fetch_artist_genres(client, cache_dir, batch_size=100, batch_delay=0)
+
+    assert result["7"] == {"name": "Artist A", "genres": ["indie"], "counts": None, "ratings": None}

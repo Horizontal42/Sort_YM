@@ -170,13 +170,19 @@ report/apply/digest --source <url> → source.parse_playlist_url() → (user_id,
 - `.token` — the account's OAuth token (not committed).
 - `cache/tracks.json` — liked track metadata, including `artist_ids` (the track's artist ids),
   `album_title` and `year` (the album's title and release year, `Album.title`/`Album.year`; `year`
-  can be `null`).
-- `cache/artist_genres.json` — `{artist_id: {name, genres: [slug, ...]}}`, one or more genres per
-  artist.
+  can be `null`), plus `added_at` (when the track was liked, `TrackShort.timestamp`),
+  `duration_ms`, `track_version`/`album_version`, `release_date`, `album_likes_count` - raw API
+  fields not used for classification but available via `report --extra` (see below).
+- `cache/artist_genres.json` — `{artist_id: {name, genres: [slug, ...], counts, ratings}}`, one or
+  more genres per artist; `counts`/`ratings` are `Artist.counts`/`Artist.ratings`, same
+  `report --extra`-only purpose as `added_at` above.
 - `cache/genre_catalog.json` — a flat snapshot of Yandex's genre tree (id -> title, root_id).
 - `cache/lyrics_lang.json` — lyrics language per track (id -> language code | null).
 - `out/report.csv` — a preview of the playlist breakdown before `apply` (including the
   `fine_bucket` column — the sub-genre before any collapsing into a top-level bucket).
+  `report --order playlist` keeps source track order instead of sorting by target playlist;
+  `report --extra` adds the columns listed above (`added_at`, `duration_ms`, `release_date`,
+  `artist_rating_month/week/day`, etc. - full list in `report.EXTRA_FIELDNAMES`).
 - `out/digest.md` — a compact library summary for pasting into an LLM chat (top artists, top
   albums, genre/language/decade breakdowns).
 - `out/report_source.csv`, `out/digest_source.md` — the same reports for a `--source` run; a

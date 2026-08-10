@@ -154,6 +154,7 @@ def fetch_playlist_tracks(
 
     # Дедуп с сохранением порядка - чужие плейлисты чаще лайков содержат один трек дважды.
     ids = list(dict.fromkeys(t.track_id for t in short))
+    added_at_by_id = {t.track_id: t.timestamp for t in short}
 
     print(f"Треков в плейлисте «{info.title}»: {len(ids)}")
 
@@ -170,7 +171,7 @@ def fetch_playlist_tracks(
             if track is None:
                 missing += 1
                 continue
-            tracks[requested_id] = fetch.serialize_track(track)
+            tracks[requested_id] = fetch.serialize_track(track, added_at=added_at_by_id.get(requested_id))
         print(f"  загружено {len(tracks)}/{len(ids)}")
         time.sleep(batch_delay)
 
@@ -191,7 +192,12 @@ def fetch_artist_genres_map(
     for batch in chunked(artist_ids, batch_size):
         artists = with_retries(lambda: client.artists(batch))
         for artist in artists:
-            result[str(artist.id)] = {"name": artist.name or "", "genres": list(artist.genres or [])}
+            result[str(artist.id)] = {
+                "name": artist.name or "",
+                "genres": list(artist.genres or []),
+                "counts": artist.counts.to_dict() if artist.counts else None,
+                "ratings": artist.ratings.to_dict() if artist.ratings else None,
+            }
         time.sleep(batch_delay)
     return result
 

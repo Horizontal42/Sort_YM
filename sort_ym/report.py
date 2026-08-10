@@ -7,8 +7,51 @@ from . import classify, genres, language
 
 FIELDNAMES = ["title", "artists", "genre_raw", "fine_bucket", "bucket", "lang", "target_playlist", "id", "album_id"]
 
+# Только вместе с --extra: сырые поля API, которых нет в базовом отчёте (см. обсуждение в чате -
+# added_at из TrackShort.timestamp, остальное - из Track/Album/Artist, но не заполнено стабильно
+# у part данных вроде explicit/lyrics_info, поэтому в набор не включено).
+EXTRA_FIELDNAMES = [
+    "added_at",
+    "duration_ms",
+    "track_version",
+    "album_version",
+    "release_date",
+    "album_likes_count",
+    "artist_track_count",
+    "artist_direct_albums",
+    "artist_also_albums",
+    "artist_also_tracks",
+    "artist_rating_month",
+    "artist_rating_week",
+    "artist_rating_day",
+]
+
 REPORT_FILE = "report.csv"
 REPORT_SOURCE_FILE = "report_source.csv"
+
+
+def _extra_row_fields(t: dict, artist_genres: dict[str, dict]) -> dict:
+    # Счётчики/рейтинг берём у первого артиста трека - у треков с несколькими артистами
+    # остальные не имеют выделенной колонки (см. обсуждение в чате).
+    artist_ids = t.get("artist_ids", [])
+    artist = artist_genres.get(str(artist_ids[0])) if artist_ids else None
+    counts = (artist or {}).get("counts") or {}
+    ratings = (artist or {}).get("ratings") or {}
+    return {
+        "added_at": t.get("added_at"),
+        "duration_ms": t.get("duration_ms"),
+        "track_version": t.get("track_version") or "",
+        "album_version": t.get("album_version") or "",
+        "release_date": t.get("release_date"),
+        "album_likes_count": t.get("album_likes_count"),
+        "artist_track_count": counts.get("tracks"),
+        "artist_direct_albums": counts.get("direct_albums"),
+        "artist_also_albums": counts.get("also_albums"),
+        "artist_also_tracks": counts.get("also_tracks"),
+        "artist_rating_month": ratings.get("month"),
+        "artist_rating_week": ratings.get("week"),
+        "artist_rating_day": ratings.get("day"),
+    }
 
 
 def build_rows(
@@ -17,6 +60,8 @@ def build_rows(
     genre_catalog: dict[str, dict],
     artist_genres: dict[str, dict],
     small_group_min: int,
+    order: str = "grouped",
+    extra_fields: bool = False,
 ) -> list[dict]:
     # Проход 1: под-жанр (fine) и язык на каждый трек, размеры групп (fine, lang) фиксируем сразу.
     prelim = []
@@ -45,28 +90,36 @@ def build_rows(
         else:
             bucket = fine
         playlist = classify.playlist_name(bucket, lang)
-        rows.append(
-            {
-                "title": t["title"],
-                "artists": ", ".join(t["artists"]),
-                "genre_raw": t["genre_raw"] or "",
-                "fine_bucket": fine,
-                "bucket": bucket,
-                "lang": lang,
-                "target_playlist": playlist,
-                "id": t["id"],
-                "album_id": t["album_id"],
-            }
-        )
-    rows.sort(key=lambda r: (r["target_playlist"], r["artists"], r["title"]))
+        row = {
+            "title": t["title"],
+            "artists": ", ".join(t["artists"]),
+            "genre_raw": t["genre_raw"] or "",
+            "fine_bucket": fine,
+            "bucket": bucket,
+            "lang": lang,
+            "target_playlist": playlist,
+            "id": t["id"],
+            "album_id": t["album_id"],
+        }
+        if extra_fields:
+            row.update(_extra_row_fields(t, artist_genres))
+        rows.append(row)
+
+    # "playlist" - порядок как в источнике (tracks_cache сохраняет порядок плейлиста, см. source.py);
+    # "grouped" (по умолчанию) - принудительная сортировка по целевому плейлисту, как раньше.
+    if order == "grouped":
+        rows.sort(key=lambda r: (r["target_playlist"], r["artists"], r["title"]))
+    elif order != "playlist":
+        raise ValueError(f"неизвестный order: {order!r}, ожидается 'grouped' или 'playlist'")
     return rows
 
 
-def write_report(rows: list[dict], out_dir: Path, filename: str = REPORT_FILE) -> Path:
+def write_report(rows: list[dict], out_dir: Path, filename: str = REPORT_FILE, extra_fields: bool = False) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / filename
+    fieldnames = FIELDNAMES + EXTRA_FIELDNAMES if extra_fields else FIELDNAMES
     with out_file.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
     return out_file

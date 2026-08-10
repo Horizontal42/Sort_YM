@@ -19,7 +19,7 @@ def _track_genre(track: Track) -> str | None:
     return None
 
 
-def serialize_track(track: Track) -> dict:
+def serialize_track(track: Track, added_at: str | None = None) -> dict:
     # album_id, album_title и year берутся из одного и того же albums[0] - иначе название
     # альбома может разъехаться с его id (у трека может быть несколько альбомов).
     album = track.albums[0] if track.albums else None
@@ -33,6 +33,14 @@ def serialize_track(track: Track) -> dict:
         "artist_ids": [a.id for a in track.artists if a.name and a.id is not None],
         "genre_raw": _track_genre(track),
         "lyrics_available": bool(track.lyrics_available),
+        # added_at - из TrackShort.timestamp (список лайков/плейлиста), не из самого Track -
+        # полный Track этой даты не содержит вообще, её знает только позиция в списке.
+        "added_at": added_at,
+        "duration_ms": track.duration_ms,
+        "track_version": track.version,
+        "album_version": album.version if album else None,
+        "release_date": album.release_date if album else None,
+        "album_likes_count": album.likes_count if album else None,
     }
 
 
@@ -65,6 +73,7 @@ def fetch_liked_tracks(
         return cache
 
     all_ids = likes.tracks_ids
+    added_at_by_id = {str(t.id): t.timestamp for t in likes.tracks}
     # "not in cache" - трек ещё не загружен; "artist_ids"/"year" not in cache[tid] - трек загружен
     # старой версией кэша (до добавления этих полей) и должен быть докачан повторно. Проверяем
     # наличие ключа, а не правдивость значения - year легитимно может быть None у части альбомов,
@@ -72,7 +81,10 @@ def fetch_liked_tracks(
     missing_ids = [
         tid
         for tid in all_ids
-        if tid not in cache or "artist_ids" not in cache[tid] or "year" not in cache[tid]
+        if tid not in cache
+        or "artist_ids" not in cache[tid]
+        or "year" not in cache[tid]
+        or "duration_ms" not in cache[tid]
     ]
 
     print(f"Лайкнутых треков: {len(all_ids)}, новых для загрузки: {len(missing_ids)}")
@@ -89,7 +101,7 @@ def fetch_liked_tracks(
         # альбомах, "основной" альбом в ответе может отличаться от того, под которым трек лайкнут.
         # Иначе такой трек тут же попадает под stale-очистку ниже как "больше не лайкнутый".
         for original_id, track in zip(batch, tracks):
-            cache[original_id] = serialize_track(track)
+            cache[original_id] = serialize_track(track, added_at=added_at_by_id.get(original_id.split(":")[0]))
         _atomic_write_json(cache_file, cache)
         print(f"  загружено {len(cache)}/{len(all_ids)}")
         time.sleep(batch_delay)
@@ -137,7 +149,7 @@ def fetch_artist_genres(
 
     tracks_cache = load_tracks_cache(cache_dir)
     all_artist_ids = unique_artist_ids(tracks_cache)
-    missing_ids = [aid for aid in all_artist_ids if aid not in cache]
+    missing_ids = [aid for aid in all_artist_ids if aid not in cache or "counts" not in cache[aid]]
 
     if not missing_ids:
         return cache
@@ -150,6 +162,8 @@ def fetch_artist_genres(
             cache[str(artist.id)] = {
                 "name": artist.name or "",
                 "genres": list(artist.genres or []),
+                "counts": artist.counts.to_dict() if artist.counts else None,
+                "ratings": artist.ratings.to_dict() if artist.ratings else None,
             }
         _atomic_write_json(cache_file, cache)
         print(f"  загружено {len(cache)}/{len(all_artist_ids)}")

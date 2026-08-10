@@ -37,6 +37,8 @@ For development (tests):
 .venv\Scripts\python -m sort_ym auth                    # log in to a Yandex account via device-flow and save the token to .token
 .venv\Scripts\python -m sort_ym fetch                   # download liked tracks (cache/tracks.json) and their artists' genres (cache/artist_genres.json); does not change the account
 .venv\Scripts\python -m sort_ym report                  # compute genre and language per track, save out/report.csv (does not change the account)
+.venv\Scripts\python -m sort_ym report --order playlist  # skip playlist-based sorting - keep source track order (as in likes/the --source playlist)
+.venv\Scripts\python -m sort_ym report --extra           # + added_at/duration_ms/release_date/artist rating columns etc.
 .venv\Scripts\python -m sort_ym apply --limit 20 --yes  # dry run: create playlists and add the first 20 tracks
 .venv\Scripts\python -m sort_ym apply --yes             # create playlists and add all tracks (changes the account)
 .venv\Scripts\python -m sort_ym digest                  # library summary (top artists, genres) to out/digest.md - to paste into an LLM chat; no network used
@@ -193,6 +195,8 @@ python -m sort_ym apply --source https://music.yandex.ru/users/vasya/playlists/1
 - `report --source`/`digest --source` write to separate files —
   `out/report_source.csv`/`out/digest_source.md` — and never overwrite your main
   `out/report.csv`/`out/digest.md`.
+- `report --source <url> --order playlist` — tracks in the CSV keep the same order as in the
+  playlist itself, instead of being resorted by target playlist.
 
 ## Handy things
 

@@ -82,8 +82,11 @@ def cmd_report(args: argparse.Namespace) -> None:
 
     if args.source:
         ctx = _source_context(cfg, args.source)
-        rows = report.build_rows(ctx.tracks, ctx.lang_cache, ctx.catalog, ctx.artist_genres, cfg.small_group_min)
-        out_file = report.write_report(rows, cfg.out_dir, report.REPORT_SOURCE_FILE)
+        rows = report.build_rows(
+            ctx.tracks, ctx.lang_cache, ctx.catalog, ctx.artist_genres, cfg.small_group_min,
+            order=args.order, extra_fields=args.extra,
+        )
+        out_file = report.write_report(rows, cfg.out_dir, report.REPORT_SOURCE_FILE, extra_fields=args.extra)
         _print_report_summary(rows, out_file)
         return
 
@@ -99,8 +102,11 @@ def cmd_report(args: argparse.Namespace) -> None:
     ids_needing_lang = [str(t["id"]) for t in tracks_cache.values() if t["lyrics_available"]]
     lang_cache = language.fetch_api_languages(client, ids_needing_lang, cfg.cache_dir, cfg.lyrics_request_delay)
 
-    rows = report.build_rows(tracks_cache, lang_cache, catalog, artist_genres, cfg.small_group_min)
-    out_file = report.write_report(rows, cfg.out_dir)
+    rows = report.build_rows(
+        tracks_cache, lang_cache, catalog, artist_genres, cfg.small_group_min,
+        order=args.order, extra_fields=args.extra,
+    )
+    out_file = report.write_report(rows, cfg.out_dir, extra_fields=args.extra)
     _print_report_summary(rows, out_file)
 
 
@@ -195,6 +201,16 @@ def main(argv: list[str] | None = None) -> None:
 
     p_report = sub.add_parser("report", help="посчитать распределение по плейлистам и сохранить out/report.csv (ничего не меняет в аккаунте)")
     p_report.add_argument("--source", metavar="URL", default=None, help=SOURCE_HELP)
+    p_report.add_argument(
+        "--order", choices=["grouped", "playlist"], default="grouped",
+        help="grouped (по умолчанию) - сортировка по целевому плейлисту; "
+        "playlist - как треки идут в источнике (в лайках или в --source плейлисте), без сортировки",
+    )
+    p_report.add_argument(
+        "--extra", action="store_true",
+        help="добавить в CSV колонки с доп. данными API: дата добавления, длительность, дата релиза "
+        "альбома, рейтинг/счётчики первого артиста трека",
+    )
 
     p_apply = sub.add_parser("apply", help="создать плейлисты и добавить треки")
     p_apply.add_argument("--yes", action="store_true", help="подтвердить внесение изменений в аккаунт")
