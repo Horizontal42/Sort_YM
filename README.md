@@ -22,14 +22,18 @@ Requirements: Python 3.11+ (uses `tomllib` from the standard library), Windows/L
 
 ```
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install -r requirements.txt      # Windows
+.venv/bin/pip install -r requirements.txt          # Linux/macOS
 ```
 
 For development (tests):
 
 ```
-.venv\Scripts\pip install -r requirements-dev.txt
+.venv\Scripts\pip install -r requirements-dev.txt  # Windows
+.venv/bin/pip install -r requirements-dev.txt      # Linux/macOS
 ```
+
+All commands below use the Windows `.venv\Scripts\...` path — on Linux/macOS substitute `.venv/bin/...`.
 
 ## What it does
 
@@ -77,7 +81,8 @@ These flags change that — from most to least commonly useful:
 To start over from scratch (re-fetch everything), delete the `cache/` folder:
 
 ```
-Remove-Item -Recurse -Force cache
+Remove-Item -Recurse -Force cache  # Windows (PowerShell)
+rm -rf cache                       # Linux/macOS
 ```
 
 The cache consists of four files:
@@ -91,7 +96,8 @@ Deleting `cache/` makes `fetch` and `report` re-fetch everything from scratch on
 You can also delete the generated reports (`out/report.csv`, `out/digest.md`):
 
 ```
-Remove-Item -Recurse -Force out
+Remove-Item -Recurse -Force out  # Windows (PowerShell)
+rm -rf out                       # Linux/macOS
 ```
 
 It's just analysis output — deleting it doesn't affect the next `report`/`digest` run.
@@ -99,7 +105,8 @@ It's just analysis output — deleting it doesn't affect the next `report`/`dige
 **Important:** the `.token` file (OAuth token) is not part of the cache and is not removed by clearing `cache/`. Clearing the cache does not log you out. To force re-authentication, delete `.token` separately:
 
 ```
-Remove-Item .token
+Remove-Item .token  # Windows (PowerShell)
+rm .token           # Linux/macOS
 ```
 
 ## How genre and language are determined

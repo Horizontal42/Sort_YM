@@ -22,14 +22,18 @@ $ python -m sort_ym report
 
 ```
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install -r requirements.txt      # Windows
+.venv/bin/pip install -r requirements.txt          # Linux/macOS
 ```
 
 Для разработки (тесты):
 
 ```
-.venv\Scripts\pip install -r requirements-dev.txt
+.venv\Scripts\pip install -r requirements-dev.txt  # Windows
+.venv/bin/pip install -r requirements-dev.txt      # Linux/macOS
 ```
+
+Все команды ниже используют путь Windows `.venv\Scripts\...` — на Linux/macOS вместо него `.venv/bin/...`.
 
 ## Что делает
 
@@ -77,7 +81,8 @@ python -m venv .venv
 Если требуется начать с чистого листа (переполучить все данные с нуля), удалите папку `cache/`:
 
 ```
-Remove-Item -Recurse -Force cache
+Remove-Item -Recurse -Force cache  # Windows (PowerShell)
+rm -rf cache                       # Linux/macOS
 ```
 
 Кэш состоит из четырёх файлов:
@@ -91,7 +96,8 @@ Remove-Item -Recurse -Force cache
 Также можно удалить сгенерированные отчёты (`out/report.csv`, `out/digest.md`):
 
 ```
-Remove-Item -Recurse -Force out
+Remove-Item -Recurse -Force out  # Windows (PowerShell)
+rm -rf out                       # Linux/macOS
 ```
 
 Это просто результаты анализа, их удаление не повлияет на следующий запуск `report`/`digest`.
@@ -99,7 +105,8 @@ Remove-Item -Recurse -Force out
 **Важно:** файл `.token` (OAuth-токен) не входит в кэш и не удаляется при очистке `cache/`. Очистка кэша вас не разлогирует. Если нужна повторная авторизация, удалите `.token` отдельно:
 
 ```
-Remove-Item .token
+Remove-Item .token  # Windows (PowerShell)
+rm .token           # Linux/macOS
 ```
 
 ## Как определяется жанр и язык
