@@ -252,16 +252,19 @@ def analyze_tracks(
         }
         try:
             data = call(settings, prompt)
+            entry = {**data, **stamp, "key_line_verified": verify_key_line(data["key_line"], text)}
         # Широкий except намеренно: трёхчасовой прогон не должен падать целиком из-за
-        # одного зависшего/битого ответа локальной модели. KeyboardInterrupt и SystemExit
-        # наследуются от BaseException и сюда не попадают - Ctrl+C прерывает прогон.
+        # одного зависшего/битого ответа локальной модели - в том числе синтаксически
+        # валидного JSON без обязательного поля (KeyError здесь же, не только в call()).
+        # KeyboardInterrupt и SystemExit наследуются от BaseException и сюда не попадают -
+        # Ctrl+C прерывает прогон.
         except Exception as e:
             cache[tid] = {**stamp, "error": f"{type(e).__name__}: {e}"}
             failed += 1
             print(f"  [{i}/{len(pending)}] {info['title']} - ошибка: {type(e).__name__}")
         else:
-            cache[tid] = {**data, **stamp, "key_line_verified": verify_key_line(data["key_line"], text)}
-            print(f"  [{i}/{len(pending)}] {info['title']} - {', '.join(data['mood'])}")
+            cache[tid] = entry
+            print(f"  [{i}/{len(pending)}] {info['title']} - {', '.join(entry.get('mood', []))}")
         _atomic_write_json(cache_file, cache)
 
     if failed:

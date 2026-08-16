@@ -246,6 +246,20 @@ def test_analyze_records_error_marker_and_continues(tmp_path: Path):
     assert result["200"]["summary"] == "Герой бродит по городу.", "таймаут одного трека не роняет батч"
 
 
+def test_analyze_records_error_marker_for_schema_incomplete_response(tmp_path: Path):
+    # Ollama иногда возвращает синтаксически валидный JSON без обязательного поля -
+    # это не исключение внутри call(), падает на доступе к data[...] после успешного возврата.
+    def call(settings, prompt):
+        if "Тоска" in prompt:
+            return {k: v for k, v in GOOD_RESPONSE.items() if k != "key_line"}
+        return dict(GOOD_RESPONSE)
+
+    result = analyze.analyze_tracks(TRACKS, LYRICS, tmp_path, _settings(), call=call)
+
+    assert "KeyError" in result["100"]["error"]
+    assert result["200"]["summary"] == "Герой бродит по городу.", "битый ответ одного трека не роняет батч"
+
+
 def test_analyze_retries_error_entries_on_next_run(tmp_path: Path):
     def failing(settings, prompt):
         raise TimeoutError("модель зависла")
