@@ -7,7 +7,7 @@ from yandex_music import Client
 from yandex_music.exceptions import UnauthorizedError
 
 from . import apply as apply_mod
-from . import auth, classify, digest, fetch, genres, language, report, source
+from . import analyze, auth, classify, digest, fetch, genres, language, lyrics, report, source
 from .config import Config, load_config
 from .ymclient import make_client
 
@@ -61,6 +61,51 @@ def cmd_fetch(args: argparse.Namespace) -> None:
     client = make_client(auth.get_token(cfg.token_file), cfg.request_timeout)
     fetch.fetch_liked_tracks(client, cfg.cache_dir, cfg.batch_size, cfg.fetch_batch_delay)
     fetch.fetch_artist_genres(client, cfg.cache_dir, cfg.batch_size, cfg.fetch_batch_delay)
+
+
+def cmd_lyrics(args: argparse.Namespace) -> None:
+    cfg = load_config()
+    client = make_client(auth.get_token(cfg.token_file), cfg.request_timeout)
+
+    tracks_cache = fetch.load_tracks_cache(cfg.cache_dir)
+    if not tracks_cache:
+        raise SystemExit("Кэш треков пуст. Сначала запустите: python -m sort_ym fetch")
+
+    # Тот же вызов, что в cmd_report: инкрементальный, на заполненном кэше почти no-op,
+    # но без него RU-гейт опирался бы только на алфавитную эвристику.
+    ids_needing_lang = [str(t["id"]) for t in tracks_cache.values() if t["lyrics_available"]]
+    lang_cache = language.fetch_api_languages(client, ids_needing_lang, cfg.cache_dir, cfg.lyrics_request_delay)
+
+    ids = lyrics.ru_lyric_track_ids(tracks_cache, lang_cache)
+    if args.limit is not None:
+        ids = ids[: args.limit]
+
+    print(f"RU-треков с текстом: {len(ids)}")
+    lyrics.fetch_lyrics_text(client, ids, cfg.cache_dir, cfg.lyrics_request_delay)
+
+
+def cmd_analyze(args: argparse.Namespace) -> None:
+    # Ни одной сетевой ручки Яндекса: analyze работает только по кэшам плюс локальная Ollama.
+    cfg = load_config()
+
+    tracks_cache = fetch.load_tracks_cache(cfg.cache_dir)
+    if not tracks_cache:
+        raise SystemExit("Кэш треков пуст. Сначала запустите: python -m sort_ym fetch")
+
+    lyrics_cache = lyrics.load_lyrics_cache(cfg.cache_dir)
+    if not lyrics_cache:
+        raise SystemExit("Нет текстов песен. Сначала запустите: python -m sort_ym lyrics")
+
+    settings = analyze.OllamaSettings(
+        host=cfg.ollama_host,
+        model=args.model or cfg.ollama_model,
+        prompt_version=cfg.ollama_prompt_version,
+        timeout=cfg.ollama_timeout,
+        keep_alive=cfg.ollama_keep_alive,
+    )
+    result = analyze.analyze_tracks(tracks_cache, lyrics_cache, cfg.cache_dir, settings, limit=args.limit)
+    print(f"\nРазобрано треков в кэше: {len(digest.analyzed_entries(result))}")
+    print("Дайджест разбора соберётся при следующем: python -m sort_ym digest")
 
 
 def _print_report_summary(rows: list[dict], out_file) -> None:
@@ -169,6 +214,7 @@ def cmd_digest(args: argparse.Namespace) -> None:
         tracks_cache, artist_genres, catalog, lang_cache = ctx.tracks, ctx.artist_genres, ctx.catalog, ctx.lang_cache
         wording = digest.playlist_wording(ctx.info.title, ctx.info.owner, ctx.info.url)
         out_name = digest.DIGEST_SOURCE_FILE
+        analysis = {}
     else:
         tracks_cache = fetch.load_tracks_cache(cfg.cache_dir)
         if not tracks_cache:
@@ -181,13 +227,19 @@ def cmd_digest(args: argparse.Namespace) -> None:
         artist_genres = fetch.load_artist_genres(cfg.cache_dir)
         lang_cache = language.load_lang_cache(cfg.cache_dir)  # только кэш, без сети
         wording, out_name = digest.DEFAULT_WORDING, digest.DIGEST_FILE
+        analysis = analyze.load_analysis(cfg.cache_dir)  # только кэш, без сети и без Ollama
 
     rows = report.build_rows(tracks_cache, lang_cache, catalog, artist_genres, cfg.small_group_min)
 
     top = args.top if args.top is not None else cfg.digest_top_artists
     top_albums = args.top_albums if args.top_albums is not None else cfg.digest_top_albums
-    text = digest.render_digest(rows, tracks_cache, artist_genres, top, top_albums, wording=wording)
+    text = digest.render_digest(rows, tracks_cache, artist_genres, top, top_albums, wording=wording, analysis=analysis)
     out_file = digest.write_digest(text, cfg.out_dir, out_name)
+
+    if analysis:
+        lyrics_text = digest.render_lyrics_digest(tracks_cache, analysis)
+        lyrics_file = digest.write_digest(lyrics_text, cfg.out_dir, digest.LYRICS_DIGEST_FILE)
+        print(f"Разбор текстов сохранён: {lyrics_file}")
 
     print("\nЖанры:")
     for g in digest.genre_stats(rows):
@@ -208,6 +260,17 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("auth", help="войти через device-flow и сохранить токен")
     sub.add_parser("fetch", help="загрузить лайкнутые треки в локальный кэш")
+
+    p_lyrics = sub.add_parser("lyrics", help="загрузить тексты песен RU-треков в cache/lyrics_text.json")
+    p_lyrics.add_argument("--limit", type=int, default=None, help="ограничить количество треков (для пробного запуска)")
+
+    p_analyze = sub.add_parser(
+        "analyze",
+        help="разобрать тексты песен локальной моделью через Ollama (cache/lyrics_analysis.json); "
+        "долгий локальный прогон, прерывается и продолжается без потери прогресса",
+    )
+    p_analyze.add_argument("--limit", type=int, default=None, help="ограничить количество треков (для пробного запуска)")
+    p_analyze.add_argument("--model", default=None, help="переопределить модель Ollama из config.toml")
 
     p_report = sub.add_parser("report", help="посчитать распределение по плейлистам и сохранить out/report.csv (ничего не меняет в аккаунте)")
     p_report.add_argument("--source", metavar="URL", default=None, help=SOURCE_HELP)
@@ -248,6 +311,8 @@ def main(argv: list[str] | None = None) -> None:
     commands = {
         "auth": cmd_auth,
         "fetch": cmd_fetch,
+        "lyrics": cmd_lyrics,
+        "analyze": cmd_analyze,
         "report": cmd_report,
         "apply": cmd_apply,
         "dedupe": cmd_dedupe,
