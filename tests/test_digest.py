@@ -275,3 +275,58 @@ def test_digest_line_count_stays_bounded_on_large_library():
     text = digest.render_digest(rows, tracks_cache, {}, top_artists=40, top_albums=15)
 
     assert len(text.splitlines()) < 250
+
+
+ANALYSIS = {
+    "100": {"mood": ["melancholy", "longing"], "themes": ["city", "memory"], "stance": "sincere", "pov": "confessional"},
+    "200": {"mood": ["melancholy"], "themes": ["city"], "stance": "ironic", "pov": "narrative"},
+    "300": {"error": "TimeoutError: модель зависла"},
+}
+
+
+def test_mood_stats_counts_every_mood_of_a_track():
+    assert digest.mood_stats(ANALYSIS) == [
+        {"mood": "melancholy", "tracks": 2},
+        {"mood": "longing", "tracks": 1},
+    ]
+
+
+def test_theme_stats_limits_and_orders():
+    assert digest.theme_stats(ANALYSIS, limit=1) == [{"theme": "city", "tracks": 2}]
+
+
+def test_analyzed_entries_excludes_error_markers():
+    assert len(digest.analyzed_entries(ANALYSIS)) == 2
+
+
+def test_lyrics_block_is_compact():
+    lines = digest.lyrics_block(ANALYSIS)
+
+    assert lines[0] == "## Лирика (RU-подмножество)"
+    assert len(lines) <= 7, "агрегат в digest.md должен оставаться компактным"
+    assert any("melancholy 2" in line for line in lines)
+    assert any("city 2" in line for line in lines)
+
+
+def test_lyrics_block_empty_without_analysis():
+    assert digest.lyrics_block({}) == []
+    assert digest.lyrics_block({"300": {"error": "TimeoutError: ..."}}) == []
+
+
+def test_render_digest_without_analysis_has_no_lyrics_section():
+    # Обратная совместимость: без analysis дайджест прежний, как в test_default_wording_matches_likes_output.
+    tracks_cache = {"100:1000": _track(100, "Тоска", ["Артист"], "rock")}
+    rows = _rows(tracks_cache)
+
+    text = digest.render_digest(rows, tracks_cache, {}, top_artists=10, top_albums=10)
+
+    assert "## Лирика" not in text
+
+
+def test_render_digest_with_analysis_includes_lyrics_section():
+    tracks_cache = {"100:1000": _track(100, "Тоска", ["Артист"], "rock")}
+    rows = _rows(tracks_cache)
+
+    text = digest.render_digest(rows, tracks_cache, {}, top_artists=10, top_albums=10, analysis=ANALYSIS)
+
+    assert "## Лирика (RU-подмножество)" in text

@@ -9,11 +9,14 @@ from . import classify, genres, report
 
 DIGEST_FILE = "digest.md"
 DIGEST_SOURCE_FILE = "digest_source.md"
+LYRICS_DIGEST_FILE = "lyrics_digest.md"
 
 DECADE_UNKNOWN = "unknown"
 DECADE_MIN_YEAR = 1900
 DECADE_MAX_YEAR = 2100
 DECADE_TOP_GENRES = 3  # константа вёрстки (сколько жанров показывать на десятилетие), не config-knob
+LYRICS_TOP_MOODS = 6
+LYRICS_TOP_THEMES = 8
 
 
 @dataclass(frozen=True)
@@ -257,6 +260,60 @@ def _pct(n: int, total: int) -> int:
     return round(100 * n / total) if total else 0
 
 
+def analyzed_entries(analysis: dict[str, dict]) -> list[dict]:
+    """Только успешные записи - таймауты и битые ответы хранятся в том же кэше с полем error."""
+    return [e for e in analysis.values() if "error" not in e]
+
+
+def _counted(counter: Counter, key: str, limit: int | None = None) -> list[dict]:
+    items = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))
+    if limit is not None:
+        items = items[:limit]
+    return [{key: name, "tracks": n} for name, n in items]
+
+
+def mood_stats(analysis: dict[str, dict]) -> list[dict]:
+    counter: Counter[str] = Counter()
+    for entry in analyzed_entries(analysis):
+        counter.update(entry.get("mood", []))
+    return _counted(counter, "mood")
+
+
+def theme_stats(analysis: dict[str, dict], limit: int) -> list[dict]:
+    counter: Counter[str] = Counter()
+    for entry in analyzed_entries(analysis):
+        counter.update(entry.get("themes", []))
+    return _counted(counter, "theme", limit)
+
+
+def lyrics_block(analysis: dict[str, dict]) -> list[str]:
+    """Компактный агрегат разбора лирики для digest.md.
+
+    Сам разбор (266 нарративных блоков) живёт в out/lyrics_digest.md - digest.md существует
+    ради фиксированного потолка ~150 строк, и класть их сюда нельзя.
+    """
+    entries = analyzed_entries(analysis)
+    if not entries:
+        return []
+
+    moods = ", ".join(f"{m['mood']} {m['tracks']}" for m in mood_stats(analysis)[:LYRICS_TOP_MOODS])
+    themes = ", ".join(f"{t['theme']} {t['tracks']}" for t in theme_stats(analysis, LYRICS_TOP_THEMES))
+    stances = Counter(e["stance"] for e in entries if "stance" in e)
+    povs = Counter(e["pov"] for e in entries if "pov" in e)
+    stance_part = " / ".join(f"{name} {n}" for name, n in sorted(stances.items(), key=lambda kv: (-kv[1], kv[0])))
+    pov_part = " / ".join(f"{name} {n}" for name, n in sorted(povs.items(), key=lambda kv: (-kv[1], kv[0])))
+
+    return [
+        "## Лирика (RU-подмножество)",
+        f"Разбор текстов {len(entries)} RU-треков локальной моделью; подробнее — out/{LYRICS_DIGEST_FILE}.",
+        f"- Настроения: {moods}",
+        f"- Темы: {themes}",
+        f"- Тон: {stance_part}",
+        f"- Ракурс: {pov_part}",
+        "",
+    ]
+
+
 def render_digest(
     rows: list[dict],
     tracks_cache: dict[str, dict],
@@ -264,6 +321,7 @@ def render_digest(
     top_artists: int,
     top_albums: int,
     wording: Wording = DEFAULT_WORDING,
+    analysis: dict[str, dict] | None = None,
 ) -> str:
     total = len(rows)
     unique_artists = {name for t in tracks_cache.values() for name in t["artists"]}
@@ -319,6 +377,8 @@ def render_digest(
         label = classify.LANG_LABELS.get(code, code)
         lines.append(f"- {label}: {n} ({_pct(n, total)}%)")
     lines.append("")
+
+    lines.extend(lyrics_block(analysis or {}))
 
     lines.append("## Десятилетия")
     lines.append("В скобках — доля от библиотеки; далее — три самые частые крупные корзины десятилетия.")
