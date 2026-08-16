@@ -46,6 +46,8 @@ All commands below use the Windows `.venv\Scripts\...` path — on Linux/macOS s
 .venv\Scripts\python -m sort_ym apply --limit 20 --yes  # dry run: create playlists and add the first 20 tracks
 .venv\Scripts\python -m sort_ym apply --yes             # create playlists and add all tracks (changes the account)
 .venv\Scripts\python -m sort_ym digest                  # library summary (top artists, genres) to out/digest.md - to paste into an LLM chat; no network used
+.venv\Scripts\python -m sort_ym lyrics                  # download the lyrics text of Russian-language tracks (cache/lyrics_text.json); does not change the account
+.venv\Scripts\python -m sort_ym analyze                 # analyze those lyrics with a local Ollama model (cache/lyrics_analysis.json); no internet, runs for hours, resumable
 ```
 
 On repeated runs `fetch` only downloads new tracks, and `apply` does not duplicate tracks already added.
@@ -85,11 +87,13 @@ Remove-Item -Recurse -Force cache  # Windows (PowerShell)
 rm -rf cache                       # Linux/macOS
 ```
 
-The cache consists of four files:
+The cache consists of six files:
 - `cache/tracks.json` — liked tracks and their metadata (including artist ids);
 - `cache/artist_genres.json` — genre tags for each artist (an artist can have several);
 - `cache/genre_catalog.json` — a snapshot of Yandex's genre tree as of the last run;
-- `cache/lyrics_lang.json` — detected lyrics language per track.
+- `cache/lyrics_lang.json` — detected lyrics language per track;
+- `cache/lyrics_text.json` — lyrics text of Russian-language tracks;
+- `cache/lyrics_analysis.json` — per-track lyric analysis from the local model.
 
 Deleting `cache/` makes `fetch` and `report` re-fetch everything from scratch on the next run.
 
@@ -163,6 +167,33 @@ Genres:
 
 Digest saved: out/digest.md
 ```
+
+Example `out/digest.md` (abridged):
+
+## Lyric analysis (Russian tracks)
+
+`lyrics` downloads the lyrics text, `analyze` reads it with a local model and writes a per-track
+profile: mood, themes, emotional arc, point of view, tone, plus a short description of what the
+song is about and why it might resonate.
+
+```
+.venv\Scripts\python -m sort_ym lyrics    # lyrics text of Russian-language tracks
+.venv\Scripts\python -m sort_ym analyze   # analysis via local Ollama, hours of local compute
+.venv\Scripts\python -m sort_ym digest    # out/lyrics_digest.md + an aggregate block in out/digest.md
+```
+
+By default only Russian-language tracks are analyzed — the prompt and the narrative fields
+(`summary`/`resonance`/`key_line`) are written in Russian and were validated on a Russian-lyrics
+pilot run; quality on other languages is unverified. Pass `--all-languages` to `lyrics` to fetch
+and analyze every track with available lyrics regardless of detected language.
+
+Requirements: Ollama running locally with the model named in `config.toml` under `[ollama]`
+(`ollama list` to check). No internet is used — `analyze` never talks to Yandex.
+
+Expect roughly 40 seconds per track — about three hours for a ~266-track library. The run is
+interruptible: results are written after every single track, so Ctrl+C costs at most one track,
+and re-running continues where it stopped. Tracks that timed out are retried on the next run.
+Raising `prompt_version` in `config.toml` invalidates the whole cache and re-analyzes everything.
 
 Example `out/digest.md` (abridged):
 

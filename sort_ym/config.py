@@ -17,6 +17,11 @@ class Config:
     small_group_min: int
     digest_top_artists: int
     digest_top_albums: int
+    ollama_host: str
+    ollama_model: str
+    ollama_prompt_version: int
+    ollama_timeout: float
+    ollama_keep_alive: str
     token_file: Path
     cache_dir: Path
     out_dir: Path
@@ -36,6 +41,11 @@ def load_config(path: Path | None = None) -> Config:
         small_group_min=data["classify"]["small_group_min"],
         digest_top_artists=data["digest"]["top_artists"],
         digest_top_albums=data["digest"]["top_albums"],
+        ollama_host=data["ollama"]["host"],
+        ollama_model=data["ollama"]["model"],
+        ollama_prompt_version=data["ollama"]["prompt_version"],
+        ollama_timeout=data["ollama"]["timeout"],
+        ollama_keep_alive=data["ollama"]["keep_alive"],
         token_file=ROOT / data["paths"]["token_file"],
         cache_dir=ROOT / data["paths"]["cache_dir"],
         out_dir=ROOT / data["paths"]["out_dir"],

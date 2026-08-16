@@ -16,3 +16,41 @@ def test_apply_empty_label_fails_before_any_network_access():
 def test_apply_without_yes_fails_regardless_of_source():
     with pytest.raises(SystemExit, match="--yes"):
         cli.main(["apply"])
+
+
+def test_lyrics_command_is_wired(monkeypatch):
+    called = {}
+    monkeypatch.setattr(
+        cli, "cmd_lyrics", lambda args: called.update(limit=args.limit, all_languages=args.all_languages)
+    )
+
+    cli.main(["lyrics", "--limit", "5"])
+
+    assert called == {"limit": 5, "all_languages": False}
+
+
+def test_lyrics_command_all_languages_flag(monkeypatch):
+    called = {}
+    monkeypatch.setattr(cli, "cmd_lyrics", lambda args: called.update(all_languages=args.all_languages))
+
+    cli.main(["lyrics", "--all-languages"])
+
+    assert called == {"all_languages": True}
+
+
+def test_analyze_command_is_wired(monkeypatch):
+    called = {}
+    monkeypatch.setattr(cli, "cmd_analyze", lambda args: called.update(limit=args.limit, model=args.model))
+
+    cli.main(["analyze", "--limit", "3", "--model", "other:latest"])
+
+    assert called == {"limit": 3, "model": "other:latest"}
+
+
+def test_analyze_defaults_have_no_limit_and_no_model_override(monkeypatch):
+    called = {}
+    monkeypatch.setattr(cli, "cmd_analyze", lambda args: called.update(limit=args.limit, model=args.model))
+
+    cli.main(["analyze"])
+
+    assert called == {"limit": None, "model": None}
