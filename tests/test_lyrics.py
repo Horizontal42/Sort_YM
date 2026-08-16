@@ -55,6 +55,23 @@ def test_ru_lyric_track_ids_deduplicates_same_numeric_id():
     assert lyrics.ru_lyric_track_ids(tracks_cache, lang_cache={}) == ["100"]
 
 
+def test_ru_lyric_track_ids_all_languages_includes_int():
+    tracks_cache = {
+        "100:10": track(100, title="Тоска", artists=["Гражданская Оборона"]),
+        "200:10": track(200, title="Come as You Are", artists=["Nirvana"]),
+    }
+
+    ids = lyrics.ru_lyric_track_ids(tracks_cache, lang_cache={}, all_languages=True)
+
+    assert ids == ["100", "200"]
+
+
+def test_ru_lyric_track_ids_all_languages_still_gates_on_lyrics_available():
+    tracks_cache = {"100:10": track(100, lyrics_available=False)}
+
+    assert lyrics.ru_lyric_track_ids(tracks_cache, lang_cache={}, all_languages=True) == []
+
+
 class FakeLyrics:
     def __init__(self, full_lyrics):
         self.full_lyrics = full_lyrics

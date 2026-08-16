@@ -71,16 +71,19 @@ def cmd_lyrics(args: argparse.Namespace) -> None:
     if not tracks_cache:
         raise SystemExit("Кэш треков пуст. Сначала запустите: python -m sort_ym fetch")
 
-    # Тот же вызов, что в cmd_report: инкрементальный, на заполненном кэше почти no-op,
-    # но без него RU-гейт опирался бы только на алфавитную эвристику.
-    ids_needing_lang = [str(t["id"]) for t in tracks_cache.values() if t["lyrics_available"]]
-    lang_cache = language.fetch_api_languages(client, ids_needing_lang, cfg.cache_dir, cfg.lyrics_request_delay)
+    lang_cache: dict[str, str | None] = {}
+    if not args.all_languages:
+        # Тот же вызов, что в cmd_report: инкрементальный, на заполненном кэше почти no-op,
+        # но без него RU-гейт опирался бы только на алфавитную эвристику.
+        ids_needing_lang = [str(t["id"]) for t in tracks_cache.values() if t["lyrics_available"]]
+        lang_cache = language.fetch_api_languages(client, ids_needing_lang, cfg.cache_dir, cfg.lyrics_request_delay)
 
-    ids = lyrics.ru_lyric_track_ids(tracks_cache, lang_cache)
+    ids = lyrics.ru_lyric_track_ids(tracks_cache, lang_cache, all_languages=args.all_languages)
     if args.limit is not None:
         ids = ids[: args.limit]
 
-    print(f"RU-треков с текстом: {len(ids)}")
+    label = "треков" if args.all_languages else "RU-треков"
+    print(f"{label} с текстом: {len(ids)}")
     lyrics.fetch_lyrics_text(client, ids, cfg.cache_dir, cfg.lyrics_request_delay)
 
 
@@ -263,6 +266,11 @@ def main(argv: list[str] | None = None) -> None:
 
     p_lyrics = sub.add_parser("lyrics", help="загрузить тексты песен RU-треков в cache/lyrics_text.json")
     p_lyrics.add_argument("--limit", type=int, default=None, help="ограничить количество треков (для пробного запуска)")
+    p_lyrics.add_argument(
+        "--all-languages",
+        action="store_true",
+        help="не фильтровать по языку - загрузить тексты всех треков с лирикой, а не только RU",
+    )
 
     p_analyze = sub.add_parser(
         "analyze",

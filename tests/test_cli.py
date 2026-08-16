@@ -20,11 +20,22 @@ def test_apply_without_yes_fails_regardless_of_source():
 
 def test_lyrics_command_is_wired(monkeypatch):
     called = {}
-    monkeypatch.setattr(cli, "cmd_lyrics", lambda args: called.update(limit=args.limit))
+    monkeypatch.setattr(
+        cli, "cmd_lyrics", lambda args: called.update(limit=args.limit, all_languages=args.all_languages)
+    )
 
     cli.main(["lyrics", "--limit", "5"])
 
-    assert called == {"limit": 5}
+    assert called == {"limit": 5, "all_languages": False}
+
+
+def test_lyrics_command_all_languages_flag(monkeypatch):
+    called = {}
+    monkeypatch.setattr(cli, "cmd_lyrics", lambda args: called.update(all_languages=args.all_languages))
+
+    cli.main(["lyrics", "--all-languages"])
+
+    assert called == {"all_languages": True}
 
 
 def test_analyze_command_is_wired(monkeypatch):

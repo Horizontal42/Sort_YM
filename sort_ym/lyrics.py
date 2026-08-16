@@ -13,13 +13,19 @@ from .ymclient import with_retries
 LYRICS_TEXT_CACHE_FILE = "lyrics_text.json"
 
 
-def ru_lyric_track_ids(tracks_cache: dict[str, dict], lang_cache: dict[str, str | None]) -> list[str]:
-    """Числовые id RU-треков, у которых вообще есть текст.
+def ru_lyric_track_ids(
+    tracks_cache: dict[str, dict],
+    lang_cache: dict[str, str | None],
+    all_languages: bool = False,
+) -> list[str]:
+    """Числовые id треков, у которых вообще есть текст.
 
-    Гейт двойной: lyrics_available (иначе track_supplement заведомо вернёт запись без lyrics)
-    и RU - анализ INT-лирики вне скоупа фичи. Дедупликация нужна потому, что один и тот же
-    трек может быть лайкнут с разных альбомов: ключи tracks_cache при этом разные, а числовой
-    id (и, соответственно, ключ кэша текстов) - один.
+    По умолчанию - только RU: на незнакомом языке текст песни несёт для языковой модели меньше
+    сигнала, чем разбор трека, который слушатель понимает дословно. all_languages=True снимает
+    языковой фильтр, оставляя только lyrics_available (иначе track_supplement заведомо вернёт
+    запись без lyrics). Дедупликация нужна потому, что один и тот же трек может быть лайкнут с
+    разных альбомов: ключи tracks_cache при этом разные, а числовой id (и, соответственно, ключ
+    кэша текстов) - один.
     """
     ids: list[str] = []
     seen: set[str] = set()
@@ -29,10 +35,12 @@ def ru_lyric_track_ids(tracks_cache: dict[str, dict], lang_cache: dict[str, str 
         tid = str(t["id"])
         if tid in seen:
             continue
-        lang = language.detect_language(t["title"], t["artists"], t["genre_raw"], lang_cache.get(tid))
-        if lang == "RU":
-            seen.add(tid)
-            ids.append(tid)
+        if not all_languages:
+            lang = language.detect_language(t["title"], t["artists"], t["genre_raw"], lang_cache.get(tid))
+            if lang != "RU":
+                continue
+        seen.add(tid)
+        ids.append(tid)
     return ids
 
 
