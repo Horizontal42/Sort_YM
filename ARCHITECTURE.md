@@ -117,11 +117,12 @@ report/apply/digest --source <url> → source.parse_playlist_url() → (user_id,
   3. An alphabet heuristic on the title/artist (Cyrillic vs Latin, `unicodedata`).
   4. Otherwise — `UNKNOWN` → a separate "Undetermined" playlist.
 
-- **Lyric analysis (`lyrics.py`, `analyze.py`)**: only Russian-language tracks are analyzed. The
-  reason is signal validity, not cost — on a foreign-language track the meaning arrives through
-  the music and the vocal delivery, not through parsed words, so an LLM reading the literal text
-  would add a signal the listener never perceives. Text fetching and analysis are **two separate
-  commands** on purpose: the fetch is network-bound against the deprecated `track_supplement`,
+- **Lyric analysis (`lyrics.py`, `analyze.py`)**: by default only Russian-language tracks are
+  analyzed — the prompt and the narrative fields (`summary`/`resonance`/`key_line`) are written
+  in Russian and were validated against a Russian-lyrics pilot run; quality on other languages is
+  unverified. `sort_ym lyrics --all-languages` lifts the filter and fetches/analyzes every track
+  with available lyrics regardless of detected language (`lyrics.ru_lyric_track_ids(...,
+  all_languages=True)`). Text fetching and analysis are **two separate commands** on purpose: the fetch is network-bound against the deprecated `track_supplement`,
   the analysis is a multi-hour local GPU job, and a prompt or model change must be re-runnable
   without touching Yandex again. `analyze` and `digest` construct no `Client` at all.
 

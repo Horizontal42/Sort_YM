@@ -175,9 +175,10 @@ song is about and why it might resonate.
 .venv\Scripts\python -m sort_ym digest    # out/lyrics_digest.md + an aggregate block in out/digest.md
 ```
 
-Only Russian-language tracks are analyzed. On a foreign-language track the meaning is carried by
-the music and the vocal delivery rather than by parsed words, so a literal reading of the text
-would add a signal the listener never actually perceives.
+By default only Russian-language tracks are analyzed — the prompt and the narrative fields
+(`summary`/`resonance`/`key_line`) are written in Russian and were validated on a Russian-lyrics
+pilot run; quality on other languages is unverified. Pass `--all-languages` to `lyrics` to fetch
+and analyze every track with available lyrics regardless of detected language.
 
 Requirements: Ollama running locally with the model named in `config.toml` under `[ollama]`
 (`ollama list` to check). No internet is used — `analyze` never talks to Yandex.
