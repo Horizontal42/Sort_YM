@@ -439,6 +439,56 @@ def render_digest(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _lyrics_track_names(tracks_cache: dict[str, dict]) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for t in tracks_cache.values():
+        names[str(t["id"])] = f"{', '.join(t['artists'])} — {t['title']}"
+    return names
+
+
+def render_lyrics_digest(tracks_cache: dict[str, dict], analysis: dict[str, dict]) -> str:
+    names = _lyrics_track_names(tracks_cache)
+    entries = [(tid, e) for tid, e in analysis.items() if "error" not in e]
+    failed = len(analysis) - len(analyzed_entries(analysis))
+
+    lines = [
+        "# Разбор текстов (RU-треки)",
+        "",
+        f"Разобрано треков: {len(entries)}. Группировка по основному настроению; "
+        "цитата приводится только если сверена с текстом дословно.",
+        "",
+    ]
+
+    by_mood: dict[str, list[tuple[str, dict]]] = {}
+    for tid, entry in entries:
+        by_mood.setdefault(entry["mood"][0], []).append((tid, entry))
+
+    for mood, items in sorted(by_mood.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        lines.append(f"## {mood} ({len(items)})")
+        lines.append("")
+        for tid, entry in sorted(items, key=lambda kv: names.get(kv[0], kv[0])):
+            lines.append(f"### {names.get(tid, f'трек {tid}')}")
+            lines.append(
+                f"- Настроение: {', '.join(entry['mood'])}; арка: {entry['emotional_arc']}; "
+                f"ракурс: {entry['pov']}; тон: {entry['stance']}; речь: {entry['register']}; "
+                f"конкретность: {entry['concreteness']}"
+            )
+            lines.append(f"- Темы: {', '.join(entry['themes'])}")
+            if entry.get("key_line_verified"):
+                lines.append(f"- Цитата: «{entry['key_line']}»")
+            lines.append("")
+            lines.append(entry["summary"])
+            lines.append("")
+            lines.append(f"Чем может цеплять: {entry['resonance']}")
+            lines.append("")
+
+    if failed:
+        lines.append(f"Не разобрано: {failed} (таймаут или сбой модели, повторный `analyze` попробует снова).")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def write_digest(text: str, out_dir: Path, filename: str = DIGEST_FILE) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / filename

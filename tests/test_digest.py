@@ -330,3 +330,76 @@ def test_render_digest_with_analysis_includes_lyrics_section():
     text = digest.render_digest(rows, tracks_cache, {}, top_artists=10, top_albums=10, analysis=ANALYSIS)
 
     assert "## Лирика (RU-подмножество)" in text
+
+
+LYRICS_TRACKS = {
+    "100:10": {"id": 100, "album_id": 10, "title": "Тоска", "artists": ["Артист"]},
+    "200:20": {"id": 200, "album_id": 20, "title": "Город", "artists": ["Другой"]},
+}
+
+FULL_ANALYSIS = {
+    "100": {
+        "mood": ["melancholy", "longing"],
+        "themes": ["city", "memory"],
+        "emotional_arc": "descent",
+        "pov": "confessional",
+        "register": "conversational",
+        "concreteness": "abstract",
+        "stance": "sincere",
+        "confidence": 0.9,
+        "summary": "Герой бродит по городу.",
+        "resonance": "Узнаваемое чувство одиночества.",
+        "key_line": "А я иду, шагаю по Москве",
+        "key_line_verified": True,
+    },
+    "200": {
+        "mood": ["melancholy"],
+        "themes": ["city"],
+        "emotional_arc": "static",
+        "pov": "narrative",
+        "register": "poetic",
+        "concreteness": "concrete",
+        "stance": "ironic",
+        "confidence": 0.8,
+        "summary": "Наблюдение за городом.",
+        "resonance": "Городская меланхолия.",
+        "key_line": "Пересказ вместо цитаты",
+        "key_line_verified": False,
+    },
+    "300": {"error": "TimeoutError: модель зависла"},
+}
+
+
+def test_render_lyrics_digest_lists_tracks_with_narrative():
+    text = digest.render_lyrics_digest(LYRICS_TRACKS, FULL_ANALYSIS)
+
+    assert "Артист — Тоска" in text
+    assert "Герой бродит по городу." in text
+    assert "Узнаваемое чувство одиночества." in text
+    assert "city, memory" in text
+
+
+def test_render_lyrics_digest_omits_unverified_key_line():
+    text = digest.render_lyrics_digest(LYRICS_TRACKS, FULL_ANALYSIS)
+
+    assert "А я иду, шагаю по Москве" in text
+    assert "Пересказ вместо цитаты" not in text, "непроверенная цитата - вероятный пересказ модели"
+
+
+def test_render_lyrics_digest_reports_failed_tracks_without_rendering_them():
+    text = digest.render_lyrics_digest(LYRICS_TRACKS, FULL_ANALYSIS)
+
+    assert "TimeoutError" not in text
+    assert "Не разобрано: 1" in text
+
+
+def test_render_lyrics_digest_groups_by_primary_mood():
+    text = digest.render_lyrics_digest(LYRICS_TRACKS, FULL_ANALYSIS)
+
+    assert "## melancholy (2)" in text
+
+
+def test_render_lyrics_digest_handles_track_missing_from_cache():
+    text = digest.render_lyrics_digest({}, {"100": FULL_ANALYSIS["100"]})
+
+    assert "трек 100" in text
