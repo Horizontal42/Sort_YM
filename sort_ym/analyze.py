@@ -5,7 +5,9 @@ import json
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 ANALYSIS_CACHE_FILE = "lyrics_analysis.json"
 
@@ -194,3 +196,74 @@ def call_ollama(settings: OllamaSettings, prompt: str) -> dict:
     with urllib.request.urlopen(request, timeout=settings.timeout) as response:
         body = json.loads(response.read().decode("utf-8"))
     return json.loads(body["message"]["content"])
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _track_meta(tracks_cache: dict[str, dict]) -> dict[str, dict]:
+    """Числовой id -> название и исполнители. Ключ tracks_cache составной ("id:album_id"),
+    а кэши текста и разбора живут на числовом id, как и cache/lyrics_lang.json."""
+    return {str(t["id"]): {"title": t["title"], "artists": t["artists"]} for t in tracks_cache.values()}
+
+
+def analyze_tracks(
+    tracks_cache: dict[str, dict],
+    lyrics_cache: dict[str, str | None],
+    cache_dir: Path,
+    settings: OllamaSettings,
+    limit: int | None = None,
+    call: Callable[[OllamaSettings, str], dict] = call_ollama,
+) -> dict[str, dict]:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / ANALYSIS_CACHE_FILE
+    cache = load_analysis(cache_dir)
+    meta = _track_meta(tracks_cache)
+
+    pending = []
+    for tid, text in lyrics_cache.items():
+        if not text:
+            continue
+        text_hash = lyrics_hash(text)
+        if is_fresh(cache.get(tid), settings.model, settings.prompt_version, text_hash):
+            continue
+        pending.append((tid, text, text_hash))
+
+    if limit is not None:
+        pending = pending[:limit]
+
+    if not pending:
+        print("Все тексты уже разобраны.")
+        return cache
+
+    print(f"Разбор текстов: {len(pending)} треков, модель {settings.model}")
+    failed = 0
+    for i, (tid, text, text_hash) in enumerate(pending, 1):
+        info = meta.get(tid, {"title": tid, "artists": []})
+        prompt = build_prompt(info["title"], info["artists"], text, top_themes(cache))
+        stamp = {
+            "model": settings.model,
+            "prompt_version": settings.prompt_version,
+            "lyrics_hash": text_hash,
+            "analyzed_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        try:
+            data = call(settings, prompt)
+        # Широкий except намеренно: трёхчасовой прогон не должен падать целиком из-за
+        # одного зависшего/битого ответа локальной модели. KeyboardInterrupt и SystemExit
+        # наследуются от BaseException и сюда не попадают - Ctrl+C прерывает прогон.
+        except Exception as e:
+            cache[tid] = {**stamp, "error": f"{type(e).__name__}: {e}"}
+            failed += 1
+            print(f"  [{i}/{len(pending)}] {info['title']} - ошибка: {type(e).__name__}")
+        else:
+            cache[tid] = {**data, **stamp, "key_line_verified": verify_key_line(data["key_line"], text)}
+            print(f"  [{i}/{len(pending)}] {info['title']} - {', '.join(data['mood'])}")
+        _atomic_write_json(cache_file, cache)
+
+    if failed:
+        print(f"  не разобрано: {failed} - повторный запуск analyze попробует их снова")
+    return cache

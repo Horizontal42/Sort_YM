@@ -169,3 +169,157 @@ def test_build_prompt_omits_known_themes_section_when_empty():
     prompt = analyze.build_prompt("Тоска", ["Артист"], "Текст песни", [])
 
     assert "Уже использованные темы" not in prompt
+
+
+GOOD_RESPONSE = {
+    "mood": ["melancholy", "longing"],
+    "themes": ["modern_loneliness", "city"],
+    "emotional_arc": "descent",
+    "pov": "confessional",
+    "register": "conversational",
+    "concreteness": "abstract",
+    "stance": "sincere",
+    "confidence": 0.9,
+    "summary": "Герой бродит по городу.",
+    "resonance": "Узнаваемое чувство одиночества.",
+    "key_line": "А я иду, шагаю по Москве",
+}
+
+TRACKS = {
+    "100:10": {"id": 100, "album_id": 10, "title": "Тоска", "artists": ["Артист"]},
+    "200:20": {"id": 200, "album_id": 20, "title": "Вторая", "artists": ["Другой"]},
+}
+LYRICS = {"100": "Первая строка\nА я иду, шагаю по Москве", "200": "Совсем другой текст"}
+
+
+def test_analyze_stores_metadata_and_verifies_key_line(tmp_path: Path):
+    settings = _settings()
+
+    result = analyze.analyze_tracks(
+        TRACKS, {"100": LYRICS["100"]}, tmp_path, settings, call=lambda s, p: dict(GOOD_RESPONSE)
+    )
+
+    entry = result["100"]
+    assert entry["model"] == settings.model
+    assert entry["prompt_version"] == 1
+    assert entry["lyrics_hash"] == analyze.lyrics_hash(LYRICS["100"])
+    assert entry["key_line_verified"] is True
+    assert entry["mood"] == ["melancholy", "longing"]
+    assert "analyzed_at" in entry
+    assert analyze.load_analysis(tmp_path) == result
+
+
+def test_analyze_marks_paraphrased_key_line_as_unverified(tmp_path: Path):
+    response = dict(GOOD_RESPONSE, key_line="Герой идёт по городу")
+
+    result = analyze.analyze_tracks(TRACKS, {"100": LYRICS["100"]}, tmp_path, _settings(), call=lambda s, p: response)
+
+    assert result["100"]["key_line_verified"] is False
+
+
+def test_analyze_writes_after_every_track(tmp_path: Path):
+    # Прогон на 266 треках идёт ~3 часа: падение на середине не должно стоить больше
+    # одного трека, поэтому запись после каждого, а не пачками.
+    def call(settings, prompt):
+        if "Вторая" in prompt:
+            raise KeyboardInterrupt("пользователь прервал прогон")
+        return dict(GOOD_RESPONSE)
+
+    try:
+        analyze.analyze_tracks(TRACKS, LYRICS, tmp_path, _settings(), call=call)
+    except KeyboardInterrupt:
+        pass
+
+    persisted = analyze.load_analysis(tmp_path)
+    assert "100" in persisted, "первый трек должен быть на диске несмотря на обрыв на втором"
+
+
+def test_analyze_records_error_marker_and_continues(tmp_path: Path):
+    def call(settings, prompt):
+        if "Тоска" in prompt:
+            raise TimeoutError("модель зависла")
+        return dict(GOOD_RESPONSE)
+
+    result = analyze.analyze_tracks(TRACKS, LYRICS, tmp_path, _settings(), call=call)
+
+    assert "TimeoutError" in result["100"]["error"]
+    assert result["200"]["summary"] == "Герой бродит по городу.", "таймаут одного трека не роняет батч"
+
+
+def test_analyze_retries_error_entries_on_next_run(tmp_path: Path):
+    def failing(settings, prompt):
+        raise TimeoutError("модель зависла")
+
+    analyze.analyze_tracks(TRACKS, {"100": LYRICS["100"]}, tmp_path, _settings(), call=failing)
+    result = analyze.analyze_tracks(
+        TRACKS, {"100": LYRICS["100"]}, tmp_path, _settings(), call=lambda s, p: dict(GOOD_RESPONSE)
+    )
+
+    assert "error" not in result["100"]
+    assert result["100"]["summary"] == "Герой бродит по городу."
+
+
+def test_analyze_skips_fresh_entries(tmp_path: Path):
+    def boom(settings, prompt):
+        raise AssertionError("не должен переанализировать свежую запись")
+
+    analyze.analyze_tracks(TRACKS, {"100": LYRICS["100"]}, tmp_path, _settings(), call=lambda s, p: dict(GOOD_RESPONSE))
+    result = analyze.analyze_tracks(TRACKS, {"100": LYRICS["100"]}, tmp_path, _settings(), call=boom)
+
+    assert result["100"]["summary"] == "Герой бродит по городу."
+
+
+def test_analyze_reanalyzes_when_lyrics_text_changed(tmp_path: Path):
+    analyze.analyze_tracks(TRACKS, {"100": LYRICS["100"]}, tmp_path, _settings(), call=lambda s, p: dict(GOOD_RESPONSE))
+
+    updated = dict(GOOD_RESPONSE, summary="Исправленный текст, другой разбор.")
+    result = analyze.analyze_tracks(TRACKS, {"100": "Исправленный текст песни"}, tmp_path, _settings(), call=lambda s, p: updated)
+
+    assert result["100"]["summary"] == "Исправленный текст, другой разбор."
+    assert result["100"]["lyrics_hash"] == analyze.lyrics_hash("Исправленный текст песни")
+
+
+def test_analyze_reanalyzes_when_prompt_version_bumped(tmp_path: Path):
+    analyze.analyze_tracks(TRACKS, {"100": LYRICS["100"]}, tmp_path, _settings(), call=lambda s, p: dict(GOOD_RESPONSE))
+
+    updated = dict(GOOD_RESPONSE, summary="Разбор по новому промпту.")
+    result = analyze.analyze_tracks(
+        TRACKS, {"100": LYRICS["100"]}, tmp_path, _settings(prompt_version=2), call=lambda s, p: updated
+    )
+
+    assert result["100"]["summary"] == "Разбор по новому промпту."
+    assert result["100"]["prompt_version"] == 2
+
+
+def test_analyze_skips_tracks_without_text(tmp_path: Path):
+    def boom(settings, prompt):
+        raise AssertionError("нечего анализировать у трека без текста")
+
+    result = analyze.analyze_tracks(TRACKS, {"100": None, "200": ""}, tmp_path, _settings(), call=boom)
+
+    assert result == {}
+
+
+def test_analyze_limit_processes_only_first_n(tmp_path: Path):
+    calls = []
+
+    def call(settings, prompt):
+        calls.append(prompt)
+        return dict(GOOD_RESPONSE)
+
+    analyze.analyze_tracks(TRACKS, LYRICS, tmp_path, _settings(), limit=1, call=call)
+
+    assert len(calls) == 1
+
+
+def test_analyze_feeds_known_themes_into_later_prompts(tmp_path: Path):
+    prompts = []
+
+    def call(settings, prompt):
+        prompts.append(prompt)
+        return dict(GOOD_RESPONSE)
+
+    analyze.analyze_tracks(TRACKS, LYRICS, tmp_path, _settings(), call=call)
+
+    assert "modern_loneliness" not in prompts[0], "первому треку подмешивать нечего"
+    assert "modern_loneliness" in prompts[1], "темы первого трека должны попасть в промпт второго"
