@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -85,3 +86,86 @@ def test_top_themes_orders_by_frequency_and_limits():
 
 def test_load_analysis_returns_empty_dict_when_missing(tmp_path: Path):
     assert analyze.load_analysis(tmp_path) == {}
+
+
+class FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def read(self):
+        return json.dumps(self._payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _settings(**overrides):
+    base = dict(
+        host="http://localhost:11434",
+        model="qwen3.6-35b-a3b:latest",
+        prompt_version=1,
+        timeout=600,
+        keep_alive="30m",
+    )
+    base.update(overrides)
+    return analyze.OllamaSettings(**base)
+
+
+def test_call_ollama_sends_schema_constrained_thinking_request(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["timeout"] = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return FakeResponse(
+            {"message": {"thinking": "рассуждение", "content": json.dumps({"mood": ["grief"]})}}
+        )
+
+    monkeypatch.setattr(analyze.urllib.request, "urlopen", fake_urlopen)
+
+    result = analyze.call_ollama(_settings(), "промпт")
+
+    assert captured["url"] == "http://localhost:11434/api/chat"
+    assert captured["timeout"] == 600
+    body = captured["body"]
+    assert body["model"] == "qwen3.6-35b-a3b:latest"
+    assert body["stream"] is False
+    assert body["think"] is True
+    assert body["format"] == analyze.RESPONSE_SCHEMA
+    assert body["keep_alive"] == "30m"
+    assert body["options"] == {"num_predict": -1, "temperature": 0.65}
+    assert body["messages"] == [{"role": "user", "content": "промпт"}]
+    assert result == {"mood": ["grief"]}, "в кэш идёт только content, не thinking"
+
+
+def test_call_ollama_strips_trailing_slash_from_host(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        return FakeResponse({"message": {"content": "{}"}})
+
+    monkeypatch.setattr(analyze.urllib.request, "urlopen", fake_urlopen)
+
+    analyze.call_ollama(_settings(host="http://localhost:11434/"), "промпт")
+
+    assert captured["url"] == "http://localhost:11434/api/chat"
+
+
+def test_build_prompt_includes_lyrics_title_and_known_themes():
+    prompt = analyze.build_prompt("Тоска", ["Артист"], "Текст песни", ["loneliness", "city"])
+
+    assert "Тоска" in prompt
+    assert "Артист" in prompt
+    assert "Текст песни" in prompt
+    assert "loneliness, city" in prompt
+
+
+def test_build_prompt_omits_known_themes_section_when_empty():
+    prompt = analyze.build_prompt("Тоска", ["Артист"], "Текст песни", [])
+
+    assert "Уже использованные темы" not in prompt

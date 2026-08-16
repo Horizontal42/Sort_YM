@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import urllib.request
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 ANALYSIS_CACHE_FILE = "lyrics_analysis.json"
@@ -126,3 +128,69 @@ def load_analysis(cache_dir: Path) -> dict[str, dict]:
     if cache_file.exists():
         return json.loads(cache_file.read_text(encoding="utf-8"))
     return {}
+
+
+@dataclass(frozen=True)
+class OllamaSettings:
+    host: str
+    model: str
+    prompt_version: int
+    timeout: float
+    keep_alive: str
+
+
+PROMPT_TEMPLATE = """Ты разбираешь текст песни для профиля музыкального вкуса одного слушателя.
+
+Трек: «{title}» — {artists}
+
+Текст:
+\"\"\"
+{lyrics}
+\"\"\"
+{themes_hint}
+Заполни поля схемы. Требования:
+- summary: 2-4 предложения по-русски о том, что в песне происходит и как это подано.
+- resonance: 1-2 предложения по-русски о том, чем этот текст может цеплять слушателя.
+- key_line: одна строка ДОСЛОВНО из текста выше, без изменений и без пересказа.
+- themes: 2-5 тем на английском в snake_case (1-3 слова, единственное число).
+- Остальные поля выбирай строго из допустимых значений схемы.
+"""
+
+THEMES_HINT_TEMPLATE = """
+Уже использованные темы в этой библиотеке (переиспользуй подходящую, иначе придумай новую):
+{themes}
+"""
+
+
+def build_prompt(title: str, artists: list[str], lyrics: str, known_themes: list[str]) -> str:
+    themes_hint = THEMES_HINT_TEMPLATE.format(themes=", ".join(known_themes)) if known_themes else ""
+    return PROMPT_TEMPLATE.format(
+        title=title,
+        artists=", ".join(artists),
+        lyrics=lyrics,
+        themes_hint=themes_hint,
+    )
+
+
+def call_ollama(settings: OllamaSettings, prompt: str) -> dict:
+    """think=True уводит рассуждение в отдельное поле message.thinking, а format (полная
+    JSON Schema, не строка "json") констрейнит только финальный ответ - модель думает
+    свободно, результат при этом гарантированно парсится. num_predict=-1: капать вывод
+    нельзя, обрыв на середине даст невалидный JSON вместо просто короткого ответа."""
+    payload = {
+        "model": settings.model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "think": True,
+        "format": RESPONSE_SCHEMA,
+        "keep_alive": settings.keep_alive,
+        "options": {"num_predict": -1, "temperature": 0.65},
+    }
+    request = urllib.request.Request(
+        f"{settings.host.rstrip('/')}/api/chat",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=settings.timeout) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    return json.loads(body["message"]["content"])
