@@ -21,6 +21,10 @@ sort_ym/
   genres.py     — реальное дерево жанров Яндекса; classify_track — сведение жанра трека и жанров
                   артиста в один под-жанр (root_id); ROOT_BUCKET — под-жанр -> 11 крупных корзин
   language.py   — гибридная детекция языка (API текста / жанр-подсказка / алфавит)
+  lyrics.py     — тексты песен RU-треков: track_supplement().lyrics.full_lyrics ->
+                  cache/lyrics_text.json (инкрементально, atomic-write)
+  analyze.py    — разбор текстов локальной Ollama (/api/chat, think + JSON Schema) ->
+                  cache/lyrics_analysis.json (запись после каждого трека)
   classify.py   — (под-жанр | крупная корзина, язык) -> имя плейлиста; with_label — суффикс метки
                   источника для apply --source --label
   report.py     — двухпроходная сборка строк отчёта, запись out/report.csv, сводки
@@ -34,13 +38,16 @@ sort_ym/
 tests/
   test_genres.py — classify_track, dominant, bucket_for, дерево жанров
   test_language.py — детекция языка
+  test_lyrics.py — загрузка текстов песен, структура кэша, резюмируемость
+  test_analyze.py — интеграция локальной Ollama, разбор JSON Schema, атомарность кэша
   test_report.py — двухпроходное схлопывание мелких под-жанровых групп
   test_fetch.py, test_apply.py — кэш треков/артистов, идемпотентность применения
   test_digest.py — агрегация по исполнителям и альбомам, схлопывание длинного хвоста,
                   границы размера дайджеста
   test_source.py — разбор ссылки на плейлист, сопоставление ответа client.tracks() по id,
                   обработка приватных/недоступных плейлистов
-  test_cli.py    — валидация флагов --source/--label до обращения к сети
+  test_cli.py, test_config.py — валидация флагов --source/--label до обращения к сети;
+                  чтение config.toml включая блок [ollama]
 
 cache/  — кэш API (в .gitignore)
 out/    — отчёты (в .gitignore)
@@ -60,6 +67,9 @@ report → genres.load_or_fetch_catalog() → cache/genre_catalog.json
 apply --yes → users_playlists_create / users_playlists_insert_track
 digest → genres.load_catalog() + language.load_lang_cache() (только кэш, сеть не используется)
        → build_rows() → out/digest.md
+lyrics  → ru_lyric_track_ids() → client.track_supplement() → cache/lyrics_text.json
+analyze → cache/lyrics_text.json → Ollama /api/chat → cache/lyrics_analysis.json
+digest  → + cache/lyrics_analysis.json → out/digest.md (агрегат) + out/lyrics_digest.md
 
 report/apply/digest --source <url> → source.parse_playlist_url() → (user_id, kind)
        → client.users_playlists(kind, user_id=...) → TrackShort[] → client.tracks(batch)
@@ -107,6 +117,35 @@ report/apply/digest --source <url> → source.parse_playlist_url() → (user_id,
   2. Подсказка по слагу жанра (`rusrap`, `shanson`, `bard`, ...).
   3. Эвристика по алфавиту названия/исполнителя (кириллица vs латиница, `unicodedata`).
   4. Иначе — `UNKNOWN` → отдельный плейлист «Не определено».
+
+- **Разбор текстов (`lyrics.py`, `analyze.py`)**: разбираются только русскоязычные треки.
+  Причина — валидность сигнала, не стоимость: на иноязычном треке смысл передаётся музыкой и
+  подачей вокала, а не разобранными словами, поэтому LLM, читающая буквальный текст, добавит
+  сигнал, который слушатель при прослушивании не считывает. Загрузка текста и анализ — это
+  **две отдельные команды** намеренно: загрузка привязана к сети и устаревшему `track_supplement`,
+  анализ — это многочасовая работа локального GPU, а смена prompt или модели должна быть
+  переиспользуема без нового обращения к Яндексу. `analyze` и `digest` вообще не создают `Client`.
+
+  Вызов Ollama (`/api/chat`) комбинирует `think: true` с полной JSON Schema в `format`:
+  рассуждение идёт в отдельное поле `message.thinking` (никогда не кэшируется), а финальный ответ
+  ограничивается грамматикой, так что модель рассуждает свободно, а результат всё равно парсится.
+  `num_predict: -1` — ограничение по токенам обрежет JSON и превратит медленный ответ в невалидный;
+  ограничение вместо этого — таймаут запроса. `temperature: 0.65`, не 0: при 0 нарративные поля
+  становятся одноообразными.
+
+  `themes` свободного формата, но ограничены паттерном англ. snake_case (`^[a-z][a-z0-9_]{2,29}$`) —
+  в пилоте неограниченное поле дрейфовало между русским и английским в одном прогоне, что сделало
+  значения невозможными для агрегации; паттерн делает кириллицу механически невозможной при разборе.
+  Они англ. по той же причине, что и слаги жанров, и `ROOT_BUCKET`: это ключи агрегации. `mood` —
+  закрытый enum, намеренно исключающий иронию/сарказм — это ось `stance`, и смешивание двух осей
+  дало составные значения типа `"aggressive/triumphant"`.
+
+  Резюмируемость: кэш пишется атомарно после **каждого трека** (не батчами по 20, как в
+  `language.py`) — инференс занимает десятки секунд, так что крах должен стоить максимум один трек.
+  Запись переиспользуется, только если совпадают `(model, prompt_version, lyrics_hash)`, поэтому
+  исправленный текст или bumped prompt инвалидирует ровно то, что надо. Таймаут или повреждённый
+  ответ сохраняются как `error` marker, прогон продолжается; error-записи никогда не считаются
+  свежими, так что следующий прогон повторит точно эти треки.
 
 - **Идентификаторы треков**: у трека есть composite `track_id` (`"id:album_id"`, используется как
   ключ кэша и для сверки с уже добавленными треками в плейлисте) и отдельные `id`/`album_id`
@@ -177,6 +216,12 @@ report/apply/digest --source <url> → source.parse_playlist_url() → (user_id,
   и `added_at` выше, только для `report --extra`.
 - `cache/genre_catalog.json` — плоский снимок дерева жанров Яндекса (id -> title, root_id).
 - `cache/lyrics_lang.json` — язык текста песни по треку (id -> language code | null).
+- `cache/lyrics_text.json` — текст песни по треку (numeric id -> текст | null, только RU-треки).
+- `cache/lyrics_analysis.json` — запись анализа на трек: `{track_id: {model, prompt_version,
+  lyrics_hash, mood, themes, emotional_arc, pov, tone, description, error?}}`.
+- `out/lyrics_digest.md` — полный построчный разбор, сгруппированный по основному настроению.
+- `config.toml` — включает блок `[ollama]` с полями `host`, `model`, `prompt_version`, `timeout`,
+  `keep_alive`.
 - `out/report.csv` — предпросмотр распределения по плейлистам перед `apply` (включая колонку
   `fine_bucket` — под-жанр до возможного схлопывания в крупную корзину). `report --order playlist`
   сохраняет исходный порядок треков вместо сортировки по целевому плейлисту; отдельные флаги

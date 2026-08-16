@@ -21,6 +21,10 @@ sort_ym/
   genres.py     — the real Yandex genre tree; classify_track — resolves track genre and artist
                   genres into a single sub-genre (root_id); ROOT_BUCKET — sub-genre -> 11 top-level buckets
   language.py   — hybrid language detection (lyrics API / genre hint / alphabet)
+  lyrics.py     — text lyrics of RU-tracks: track_supplement().lyrics.full_lyrics ->
+                  cache/lyrics_text.json (incrementally, atomic-write)
+  analyze.py    — lyric analysis via local Ollama (/api/chat, think + JSON Schema) ->
+                  cache/lyrics_analysis.json (written after each track)
   classify.py   — (sub-genre | top-level bucket, language) -> playlist name; with_label — source
                   label suffix for apply --source --label
   report.py     — two-pass report row building, writes out/report.csv, summaries
@@ -34,12 +38,15 @@ sort_ym/
 tests/
   test_genres.py — classify_track, dominant, bucket_for, genre tree
   test_language.py — language detection
+  test_lyrics.py — lyrics text download, cache structure, resumability
+  test_analyze.py — local Ollama integration, JSON Schema parsing, cache atomicity
   test_report.py — two-pass collapsing of small sub-genre groups
   test_fetch.py, test_apply.py — track/artist cache, apply idempotency
   test_digest.py — artist/album aggregation, long-tail collapsing, digest size bounds
   test_source.py — playlist URL parsing, matching client.tracks() response by id, handling
                   private/inaccessible playlists
-  test_cli.py    — --source/--label flag validation before any network access
+  test_cli.py, test_config.py — --source/--label flag validation before any network access;
+                  config.toml reading including [ollama] block
 
 cache/  — API cache (in .gitignore)
 out/    — reports (in .gitignore)
@@ -59,6 +66,9 @@ report → genres.load_or_fetch_catalog() → cache/genre_catalog.json
 apply --yes → users_playlists_create / users_playlists_insert_track
 digest → genres.load_catalog() + language.load_lang_cache() (cache only, no network)
        → build_rows() → out/digest.md
+lyrics  → ru_lyric_track_ids() → client.track_supplement() → cache/lyrics_text.json
+analyze → cache/lyrics_text.json → Ollama /api/chat → cache/lyrics_analysis.json
+digest  → + cache/lyrics_analysis.json → out/digest.md (aggregate block) + out/lyrics_digest.md
 
 report/apply/digest --source <url> → source.parse_playlist_url() → (user_id, kind)
        → client.users_playlists(kind, user_id=...) → TrackShort[] → client.tracks(batch)
@@ -106,6 +116,36 @@ report/apply/digest --source <url> → source.parse_playlist_url() → (user_id,
   2. A genre-slug hint (`rusrap`, `shanson`, `bard`, ...).
   3. An alphabet heuristic on the title/artist (Cyrillic vs Latin, `unicodedata`).
   4. Otherwise — `UNKNOWN` → a separate "Undetermined" playlist.
+
+- **Lyric analysis (`lyrics.py`, `analyze.py`)**: only Russian-language tracks are analyzed. The
+  reason is signal validity, not cost — on a foreign-language track the meaning arrives through
+  the music and the vocal delivery, not through parsed words, so an LLM reading the literal text
+  would add a signal the listener never perceives. Text fetching and analysis are **two separate
+  commands** on purpose: the fetch is network-bound against the deprecated `track_supplement`,
+  the analysis is a multi-hour local GPU job, and a prompt or model change must be re-runnable
+  without touching Yandex again. `analyze` and `digest` construct no `Client` at all.
+
+  The Ollama call (`/api/chat`) combines `think: true` with a full JSON Schema in `format`:
+  reasoning goes to a separate `message.thinking` field (never cached) while only the final
+  answer is grammar-constrained, so the model reasons freely and the result still parses.
+  `num_predict: -1` — a token cap would truncate mid-JSON and turn a slow answer into an invalid
+  one; the bound is the request timeout instead. `temperature: 0.65`, not 0: at 0 the narrative
+  fields flatten out.
+
+  `themes` are free-form but pattern-constrained to English snake_case
+  (`^[a-z][a-z0-9_]{2,29}$`) — in the pilot, an unconstrained field drifted between Russian and
+  English inside a single run, making the values impossible to aggregate; the pattern makes
+  Cyrillic mechanically unrepresentable at decode time. They are English for the same reason
+  genre slugs and `ROOT_BUCKET` keys are: they are aggregation keys. `mood` is a closed enum that
+  deliberately excludes irony/sarcasm — that axis is `stance`, and mixing the two produced
+  compound values like `"aggressive/triumphant"`.
+
+  Resumability: the cache is written atomically after **every single track** (not batched by 20
+  as in `language.py`) — inference costs tens of seconds, so a crash must cost at most one track.
+  An entry is reused only when `(model, prompt_version, lyrics_hash)` all match, so a corrected
+  lyrics text or a bumped prompt invalidates exactly what it should. A timeout or a broken
+  response is stored as an `error` marker and the batch continues; error entries are never
+  considered fresh, so the next run retries precisely those tracks.
 
 - **Track identifiers**: a track has a composite `track_id` (`"id:album_id"`, used as the cache key
   and to check against tracks already in a playlist) and separate `id`/`album_id` (needed as
@@ -178,6 +218,12 @@ report/apply/digest --source <url> → source.parse_playlist_url() → (user_id,
   `report --extra`-only purpose as `added_at` above.
 - `cache/genre_catalog.json` — a flat snapshot of Yandex's genre tree (id -> title, root_id).
 - `cache/lyrics_lang.json` — lyrics language per track (id -> language code | null).
+- `cache/lyrics_text.json` — lyrics text per track (numeric id -> text | null, RU tracks only).
+- `cache/lyrics_analysis.json` — per-track analysis record: `{track_id: {model, prompt_version,
+  lyrics_hash, mood, themes, emotional_arc, pov, tone, description, error?}}`.
+- `out/lyrics_digest.md` — full per-track reading grouped by primary mood.
+- `config.toml` — includes `[ollama]` block with `host`, `model`, `prompt_version`, `timeout`,
+  `keep_alive`.
 - `out/report.csv` — a preview of the playlist breakdown before `apply` (including the
   `fine_bucket` column — the sub-genre before any collapsing into a top-level bucket).
   `report --order playlist` keeps source track order instead of sorting by target playlist;
