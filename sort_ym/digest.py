@@ -304,8 +304,8 @@ def lyrics_block(analysis: dict[str, dict]) -> list[str]:
     pov_part = " / ".join(f"{name} {n}" for name, n in sorted(povs.items(), key=lambda kv: (-kv[1], kv[0])))
 
     return [
-        "## Лирика (RU-подмножество)",
-        f"Разбор текстов {len(entries)} RU-треков локальной моделью; подробнее — out/{LYRICS_DIGEST_FILE}.",
+        "## Лирика",
+        f"Разбор текстов {len(entries)} треков локальной моделью; подробнее — out/{LYRICS_DIGEST_FILE}.",
         f"- Настроения: {moods}",
         f"- Темы: {themes}",
         f"- Тон: {stance_part}",
@@ -452,7 +452,7 @@ def render_lyrics_digest(tracks_cache: dict[str, dict], analysis: dict[str, dict
     failed = len(analysis) - len(analyzed_entries(analysis))
 
     lines = [
-        "# Разбор текстов (RU-треки)",
+        "# Разбор текстов",
         "",
         f"Разобрано треков: {len(entries)}. Группировка по основному настроению; "
         "цитата приводится только если сверена с текстом дословно.",

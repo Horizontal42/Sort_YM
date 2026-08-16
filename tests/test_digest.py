@@ -302,7 +302,7 @@ def test_analyzed_entries_excludes_error_markers():
 def test_lyrics_block_is_compact():
     lines = digest.lyrics_block(ANALYSIS)
 
-    assert lines[0] == "## Лирика (RU-подмножество)"
+    assert lines[0] == "## Лирика"
     assert len(lines) <= 7, "агрегат в digest.md должен оставаться компактным"
     assert any("melancholy 2" in line for line in lines)
     assert any("city 2" in line for line in lines)
@@ -329,7 +329,7 @@ def test_render_digest_with_analysis_includes_lyrics_section():
 
     text = digest.render_digest(rows, tracks_cache, {}, top_artists=10, top_albums=10, analysis=ANALYSIS)
 
-    assert "## Лирика (RU-подмножество)" in text
+    assert "## Лирика" in text
 
 
 LYRICS_TRACKS = {
