@@ -5,7 +5,7 @@ import json
 import urllib.request
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -41,7 +41,7 @@ STANCES = ["sincere", "ironic", "bitter"]
 # фиксируются схемой: в пилоте без паттерна язык плавал между английским и русским внутри
 # одного прогона. Паттерн на уровне JSON Schema делает кириллицу и составные значения
 # механически невозможными на этапе генерации, а не отлавливаемыми постфактум.
-THEME_PATTERN = "^[a-z][a-z0-9_]{2,29}$"
+THEME_PATTERN = "^[a-z0-9_-]{2,30}$"
 
 
 def _enum(values: list[str]) -> dict:
@@ -193,9 +193,13 @@ def call_ollama(settings: OllamaSettings, prompt: str) -> dict:
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(request, timeout=settings.timeout) as response:
-        body = json.loads(response.read().decode("utf-8"))
-    return json.loads(body["message"]["content"])
+    try:
+        with urllib.request.urlopen(request, timeout=settings.timeout) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        return json.loads(body["message"]["content"])
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP Error {e.code}: {e.reason}\n{error_body}") from e
 
 
 def _atomic_write_json(path: Path, data: dict) -> None:
@@ -241,14 +245,15 @@ def analyze_tracks(
 
     print(f"Разбор текстов: {len(pending)} треков, модель {settings.model}")
     failed = 0
+    current_themes = top_themes(cache)
     for i, (tid, text, text_hash) in enumerate(pending, 1):
         info = meta.get(tid, {"title": tid, "artists": []})
-        prompt = build_prompt(info["title"], info["artists"], text, top_themes(cache))
+        prompt = build_prompt(info["title"], info["artists"], text, current_themes)
         stamp = {
             "model": settings.model,
             "prompt_version": settings.prompt_version,
             "lyrics_hash": text_hash,
-            "analyzed_at": datetime.now().isoformat(timespec="seconds"),
+            "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
         try:
             data = call(settings, prompt)

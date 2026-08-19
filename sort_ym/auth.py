@@ -15,7 +15,10 @@ def load_token(token_file: Path) -> str | None:
 
 def save_token(token_file: Path, token: str) -> None:
     token_file.parent.mkdir(parents=True, exist_ok=True)
-    token_file.write_text(token, encoding="utf-8")
+    import os
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    with open(os.open(token_file, flags, 0o600), "w", encoding="utf-8") as f:
+        f.write(token)
 
 
 def _on_code(code: DeviceCode) -> None:

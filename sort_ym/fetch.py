@@ -100,8 +100,11 @@ def fetch_liked_tracks(
         # пересчитанному из albums[0] вернувшегося Track - для трека, доступного на нескольких
         # альбомах, "основной" альбом в ответе может отличаться от того, под которым трек лайкнут.
         # Иначе такой трек тут же попадает под stale-очистку ниже как "больше не лайкнутый".
-        for original_id, track in zip(batch, tracks):
-            cache[original_id] = serialize_track(track, added_at=added_at_by_id.get(original_id.split(":")[0]))
+        by_id = {str(t.id): t for t in tracks}
+        for original_id in batch:
+            track = by_id.get(original_id.split(":")[0])
+            if track is not None:
+                cache[original_id] = serialize_track(track, added_at=added_at_by_id.get(original_id.split(":")[0]))
         _atomic_write_json(cache_file, cache)
         print(f"  загружено {len(cache)}/{len(all_ids)}")
         time.sleep(batch_delay)
