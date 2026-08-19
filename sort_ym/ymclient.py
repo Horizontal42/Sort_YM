@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from typing import Callable, Iterator, List, TypeVar
+from collections.abc import Callable, Iterator, Sequence
+from typing import TypeVar
 
 from yandex_music import Client
 from yandex_music.exceptions import BadRequestError, NetworkError, NotFoundError
@@ -16,7 +17,9 @@ def make_client(token: str, request_timeout: float = 20) -> Client:
     return client
 
 
-def chunked(items: List[T], size: int) -> Iterator[List[T]]:
+def chunked(items: Sequence[T], size: int) -> Iterator[Sequence[T]]:
+    if size <= 0:
+        raise ValueError("size must be > 0")
     for i in range(0, len(items), size):
         yield items[i : i + size]
 
@@ -28,6 +31,8 @@ def with_retries(fn: Callable[[], T], max_attempts: int = 4, base_delay: float =
     (данные точно не найдены / запрос точно невалиден), а не сбои сети, хотя формально
     оба тоже унаследованы от NetworkError. Повтор такого запроса даст тот же результат.
     """
+    if max_attempts <= 0:
+        max_attempts = 1
     last_exc: NetworkError | None = None
     for attempt in range(max_attempts):
         try:
@@ -38,7 +43,7 @@ def with_retries(fn: Callable[[], T], max_attempts: int = 4, base_delay: float =
             last_exc = e
             if attempt < max_attempts - 1:
                 wait = base_delay * (2**attempt)
-                print(f"  сетевая ошибка ({e}), повтор через {wait:.0f}с...")
+                print(f"  сетевая ошибка ({type(e).__name__}: {e}), повтор через {wait:.0f}с...")
                 time.sleep(wait)
 
     assert last_exc is not None

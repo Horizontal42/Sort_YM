@@ -18,7 +18,7 @@ from yandex_music.exceptions import NotFoundError, UnauthorizedError
 from . import fetch
 from .ymclient import chunked, with_retries
 
-HOST_RE = re.compile(r"^(?:www\.)?music\.yandex\.[a-z]{2,3}$", re.IGNORECASE)
+HOST_RE = re.compile(r"^(?:www\.|m\.)?music\.yandex\.[a-z\.]+$", re.IGNORECASE)
 # "lk." (личный кабинет) - префикс у ссылок на персональные плейлисты (например, "Мне нравится"),
 # в отличие от чистого uuid у редакционных плейлистов - подтверждено вживую через client.playlist():
 # без префикса API отвечает NotFoundError, префикс - часть самого uuid, а не что-то, что надо отрезать.

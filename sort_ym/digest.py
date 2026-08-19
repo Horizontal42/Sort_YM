@@ -492,5 +492,7 @@ def render_lyrics_digest(tracks_cache: dict[str, dict], analysis: dict[str, dict
 def write_digest(text: str, out_dir: Path, filename: str = DIGEST_FILE) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / filename
-    out_file.write_text(text, encoding="utf-8")
+    tmp = out_file.with_suffix(".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(out_file)
     return out_file

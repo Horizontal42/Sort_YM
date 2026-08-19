@@ -45,6 +45,8 @@ def alphabet_heuristic(title: str, artists: list[str]) -> str | None:
     text = " ".join([title, *artists])
     cyrillic, latin = _script_counts(text)
     if cyrillic == 0 and latin == 0:
+        if any(ch.isalpha() for ch in text):
+            return "INT"
         return None
     if cyrillic > latin:
         return "RU"
@@ -99,14 +101,14 @@ def load_lang_cache(cache_dir: Path) -> dict[str, str | None]:
     return {}
 
 
-def _fetch_one_language(client: Client, track_id: str) -> str | None:
+def _fetch_supplement(client: Client, track_id: str) -> tuple[str | None, str | None]:
     try:
         supplement = with_retries(lambda: client.track_supplement(track_id))
     except NotFoundError:
-        return None
+        return None, None
     if supplement is None or supplement.lyrics is None:
-        return None
-    return supplement.lyrics.text_language
+        return None, None
+    return supplement.lyrics.text_language, supplement.lyrics.full_lyrics
 
 
 def fetch_api_languages(
@@ -119,17 +121,28 @@ def fetch_api_languages(
     cache_file = cache_dir / LYRICS_LANG_CACHE_FILE
     cache = load_lang_cache(cache_dir)
 
+    text_cache_file = cache_dir / "lyrics_text.json"
+    if text_cache_file.exists():
+        text_cache = json.loads(text_cache_file.read_text(encoding="utf-8"))
+    else:
+        text_cache = {}
+
     missing = [tid for tid in track_ids if tid not in cache]
     if not missing:
         return cache
 
     print(f"Запрос языка текста песни для {len(missing)} треков...")
     for i, tid in enumerate(missing, 1):
-        cache[tid] = _fetch_one_language(client, tid)
+        lang, text = _fetch_supplement(client, tid)
+        cache[tid] = lang
+        if text is not None and normalize_api_language(lang) == "RU":
+            text_cache[tid] = text
         if i % 20 == 0:
             _atomic_write_json(cache_file, cache)
+            _atomic_write_json(text_cache_file, text_cache)
             print(f"  обработано {i}/{len(missing)}")
         time.sleep(delay)
 
     _atomic_write_json(cache_file, cache)
+    _atomic_write_json(text_cache_file, text_cache)
     return cache

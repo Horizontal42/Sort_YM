@@ -103,6 +103,8 @@ def build_rows(
     for t, fine, lang in prelim:
         if group_sizes[(fine, lang)] < small_group_min:
             bucket = genres.coarse_of(fine)
+            if bucket == fine:
+                bucket = "other"
         else:
             bucket = fine
         playlist = classify.playlist_name(bucket, lang)

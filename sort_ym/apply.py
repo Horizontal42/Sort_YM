@@ -27,7 +27,7 @@ def _existing_track_ids(client: Client, playlist: Playlist, max_attempts: int = 
     for attempt in range(max_attempts):
         full = with_retries(lambda: client.users_playlists(playlist.kind))
         if full is not None:
-            return {t.track_id for t in full.tracks}
+            return {str(t.track_id).split(":")[0] for t in full.tracks}
         if attempt < max_attempts - 1:
             wait = 2.0 * (2**attempt)
             print(f"  пустой ответ при чтении плейлиста «{playlist.title}», повтор через {wait:.0f}с...")
@@ -91,7 +91,7 @@ def _insert_track_verified(
             fresh = with_retries(lambda: client.users_playlists(playlist.kind))
             if fresh is not None:
                 revision = fresh.revision or revision
-                if track_key in {t.track_id for t in fresh.tracks}:
+                if track_key in {str(t.track_id).split(":")[0] for t in fresh.tracks}:
                     return revision
             if last_attempt:
                 raise
@@ -188,37 +188,50 @@ def dedupe_playlists(client: Client, delay: float, dry_run: bool = True) -> None
     playlists = with_retries(lambda: client.users_playlists_list())
 
     total_ranges = 0
-    total_tracks = 0
+    total_found = 0
+    total_removed = 0
     for playlist in playlists:
         full = with_retries(lambda: client.users_playlists(playlist.kind))
         if full is None:
             print(f"  не удалось прочитать «{playlist.title}», пропускаю")
             continue
 
-        ids = [t.track_id for t in full.tracks]
+        ids = [str(t.track_id).split(":")[0] for t in full.tracks]
         ranges = find_duplicate_ranges(ids)
         if not ranges:
             continue
 
         n = sum(to - frm for frm, to in ranges)
         total_ranges += len(ranges)
-        total_tracks += n
+        total_found += n
 
         if dry_run:
             print(f"{playlist.title}: найдено дублей {n} ({len(ranges)} диапазон(ов))")
             continue
 
         revision = full.revision or 1
+        removed = 0
         for frm, to in sorted(ranges, key=lambda r: -r[0]):
-            updated = client.users_playlists_delete_track(playlist.kind, frm, to, revision=revision)
-            revision = updated.revision if updated is not None and updated.revision is not None else revision + 1
+            try:
+                updated = with_retries(lambda: client.users_playlists_delete_track(playlist.kind, frm, to, revision=revision))
+                if updated is not None and updated.revision is not None:
+                    revision = updated.revision
+            except NetworkError as e:
+                print(f"  сетевая ошибка при удалении из «{playlist.title}» ({e}), прерываю")
+                break
+            except BadRequestError as e:
+                print(f"  ошибка при удалении из «{playlist.title}» ({e}), прерываю")
+                break
+            removed += to - frm
             time.sleep(delay)
-        print(f"{playlist.title}: удалено {n} дублей")
+        total_removed += removed
+        suffix = "" if removed == n else f" из {n} найденных"
+        print(f"{playlist.title}: удалено {removed} дублей{suffix}")
 
     if dry_run:
-        if total_tracks:
-            print(f"\nВсего дублей найдено: {total_tracks} в {total_ranges} диапазон(ов). Запустите с --yes для удаления.")
+        if total_found:
+            print(f"\nВсего дублей найдено: {total_found} в {total_ranges} диапазон(ов). Запустите с --yes для удаления.")
         else:
             print("\nДублей не найдено.")
     else:
-        print(f"\nВсего удалено дублей: {total_tracks}")
+        print(f"\nВсего удалено дублей: {total_removed}")

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from yandex_music import Client, Genre
 
+from .fetch import _atomic_write_json
 from .ymclient import with_retries
 
 GENRE_CATALOG_FILE = "genre_catalog.json"
@@ -114,7 +115,7 @@ def load_or_fetch_catalog(client: Client, cache_dir: Path) -> dict[str, dict]:
     roots = with_retries(lambda: client.genres())
     flat = flatten_catalog(roots)
     cache_file = cache_dir / GENRE_CATALOG_FILE
-    cache_file.write_text(json.dumps(flat, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_json(cache_file, flat)
     return flat
 
 
