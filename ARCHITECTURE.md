@@ -134,7 +134,7 @@ report/apply/digest --source <url> → source.parse_playlist_url() → (user_id,
   fields flatten out.
 
   `themes` are free-form but pattern-constrained to English snake_case
-  (`^[a-z][a-z0-9_]{2,29}$`) — in the pilot, an unconstrained field drifted between Russian and
+  (`^[a-z0-9][a-z0-9_-]{2,29}$`) — in the pilot, an unconstrained field drifted between Russian and
   English inside a single run, making the values impossible to aggregate; the pattern makes
   Cyrillic mechanically unrepresentable at decode time. They are English for the same reason
   genre slugs and `ROOT_BUCKET` keys are: they are aggregation keys. `mood` is a closed enum that

@@ -135,7 +135,7 @@ def fetch_api_languages(
     for i, tid in enumerate(missing, 1):
         lang, text = _fetch_supplement(client, tid)
         cache[tid] = lang
-        if text is not None:
+        if text is not None and normalize_api_language(lang) == "RU":
             text_cache[tid] = text
         if i % 20 == 0:
             _atomic_write_json(cache_file, cache)

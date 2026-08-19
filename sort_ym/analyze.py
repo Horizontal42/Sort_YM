@@ -41,7 +41,7 @@ STANCES = ["sincere", "ironic", "bitter"]
 # фиксируются схемой: в пилоте без паттерна язык плавал между английским и русским внутри
 # одного прогона. Паттерн на уровне JSON Schema делает кириллицу и составные значения
 # механически невозможными на этапе генерации, а не отлавливаемыми постфактум.
-THEME_PATTERN = "^[a-z0-9_-]{2,30}$"
+THEME_PATTERN = "^[a-z0-9][a-z0-9_-]{2,29}$"
 
 
 def _enum(values: list[str]) -> dict:
@@ -245,10 +245,9 @@ def analyze_tracks(
 
     print(f"Разбор текстов: {len(pending)} треков, модель {settings.model}")
     failed = 0
-    current_themes = top_themes(cache)
     for i, (tid, text, text_hash) in enumerate(pending, 1):
         info = meta.get(tid, {"title": tid, "artists": []})
-        prompt = build_prompt(info["title"], info["artists"], text, current_themes)
+        prompt = build_prompt(info["title"], info["artists"], text, top_themes(cache))
         stamp = {
             "model": settings.model,
             "prompt_version": settings.prompt_version,

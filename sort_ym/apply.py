@@ -188,7 +188,8 @@ def dedupe_playlists(client: Client, delay: float, dry_run: bool = True) -> None
     playlists = with_retries(lambda: client.users_playlists_list())
 
     total_ranges = 0
-    total_tracks = 0
+    total_found = 0
+    total_removed = 0
     for playlist in playlists:
         full = with_retries(lambda: client.users_playlists(playlist.kind))
         if full is None:
@@ -202,13 +203,14 @@ def dedupe_playlists(client: Client, delay: float, dry_run: bool = True) -> None
 
         n = sum(to - frm for frm, to in ranges)
         total_ranges += len(ranges)
-        total_tracks += n
+        total_found += n
 
         if dry_run:
             print(f"{playlist.title}: найдено дублей {n} ({len(ranges)} диапазон(ов))")
             continue
 
         revision = full.revision or 1
+        removed = 0
         for frm, to in sorted(ranges, key=lambda r: -r[0]):
             try:
                 updated = with_retries(lambda: client.users_playlists_delete_track(playlist.kind, frm, to, revision=revision))
@@ -220,13 +222,16 @@ def dedupe_playlists(client: Client, delay: float, dry_run: bool = True) -> None
             except BadRequestError as e:
                 print(f"  ошибка при удалении из «{playlist.title}» ({e}), прерываю")
                 break
+            removed += to - frm
             time.sleep(delay)
-        print(f"{playlist.title}: удалено {n} дублей")
+        total_removed += removed
+        suffix = "" if removed == n else f" из {n} найденных"
+        print(f"{playlist.title}: удалено {removed} дублей{suffix}")
 
     if dry_run:
-        if total_tracks:
-            print(f"\nВсего дублей найдено: {total_tracks} в {total_ranges} диапазон(ов). Запустите с --yes для удаления.")
+        if total_found:
+            print(f"\nВсего дублей найдено: {total_found} в {total_ranges} диапазон(ов). Запустите с --yes для удаления.")
         else:
             print("\nДублей не найдено.")
     else:
-        print(f"\nВсего удалено дублей: {total_tracks}")
+        print(f"\nВсего удалено дублей: {total_removed}")

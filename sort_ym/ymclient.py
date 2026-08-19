@@ -33,15 +33,13 @@ def with_retries(fn: Callable[[], T], max_attempts: int = 4, base_delay: float =
     """
     if max_attempts <= 0:
         max_attempts = 1
-    last_exc: Exception | None = None
+    last_exc: NetworkError | None = None
     for attempt in range(max_attempts):
         try:
             return fn()
         except (NotFoundError, BadRequestError):
             raise
-        except Exception as e:
-            if isinstance(e, (TypeError, ValueError, AttributeError, NameError)):
-                raise
+        except NetworkError as e:
             last_exc = e
             if attempt < max_attempts - 1:
                 wait = base_delay * (2**attempt)
